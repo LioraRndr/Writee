@@ -4,14 +4,14 @@
 
 ---
 
-## 2026-10-03 · GitHub 公开仓库上传准备
+## 2026-10-03 · GitHub 公开仓库首次上传
 
-- 按用户要求准备创建公开的 `Writee` 仓库；原项目尚未初始化 Git。
+- 按用户要求初始化 Git（`main` 分支），创建公开仓库 [LioraRndr/Writee](https://github.com/LioraRndr/Writee)，配置 `origin` 并推送首次提交（87 个文件）。
 - 检查源码与资源文件，未发现真实 API Key、GitHub Token 或私钥；BYOK 配置、注释和文档存档位于浏览器，不在上传文件内。
 - 保留原有依赖 / 构建 / 日志忽略规则，增加 `.env`、`.env.*` 和 `*.partial`，保留 `.env.example` 可提交。
 - 新增 `Agent.md` 入口，链接现有 `CLAUDE.md` 与 `AGENTS.md`。
 - 类型检查、10 项单元测试、生产构建通过；构建产物写入系统临时目录。
-- 本机 GitHub 登录凭据失效，已启动设备授权；仓库创建与上传待授权完成。
+- 更新本机 GitHub CLI 登录授权；凭据保存和 Git 写入需在沙箱外执行，现已完成登录、建仓与推送。
 
 ---
 

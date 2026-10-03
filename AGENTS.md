@@ -179,7 +179,7 @@ useDoc.applyChanges / applyTransform / replaceText
 
 **已完成**：第 1 节需求 1–10 全部实现并通过上述测试。
 
-**GitHub 上传准备（2026-10-03）**：完成源码密钥检查、类型检查、10 项单元测试与生产构建；补齐 `Agent.md` 入口与环境配置 / 同步临时文件忽略规则。公开仓库创建和推送待 GitHub 登录授权完成。
+**GitHub 公开仓库（2026-10-03）**：[LioraRndr/Writee](https://github.com/LioraRndr/Writee)，默认分支 `main`，本机 `origin` 已配置并完成首次推送。上传前完成源码密钥检查、类型检查、10 项单元测试与生产构建；补齐 `Agent.md` 入口与环境配置 / 同步临时文件忽略规则。
 
 **尚未验证 / 已知限制**
 - 未用真实 API Key 实测任何服务商（只有模拟测试）；第三方服务的跨域策略各不相同，必要时用“本地代理转发”。

@@ -1,0 +1,212 @@
+:root {
+  --font-serif: 'Writee Latin', 'Source Han Serif SC', 'Source Han Serif CN', 'Noto Serif SC', 'Songti SC', 'STSong',
+    serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC',
+    system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  --font-display: 'Instrument Display', 'Writee Latin', 'Noto Serif SC', serif;
+
+  --fs: 18px;
+  --lh: 1.95;
+  --col: 720px;
+  --gutter: 52px;
+  --rail: 304px;
+  --radius: 12px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* 宣纸 */
+:root,
+[data-theme='xuan'] {
+  color-scheme: light;
+  --bg: #f5f0e6;
+  --bg-elev: #fbf8f2;
+  --bg-sunken: #efe8db;
+  --bg-card-2: #f7f2e9;
+  --bg-hover: rgba(90, 64, 30, 0.06);
+  --ink: #2a2521;
+  --ink-2: #5d544a;
+  --ink-3: #988c7d;
+  --line: #e3d9c8;
+  --line-strong: #cfc2ad;
+  --accent: #a8432a;
+  --accent-ink: #fbf6ee;
+  --accent-soft: rgba(168, 67, 42, 0.1);
+  --sel: rgba(168, 67, 42, 0.16);
+  --code-bg: rgba(110, 85, 50, 0.07);
+  --shadow: 0 1px 2px rgba(80, 55, 25, 0.04), 0 6px 22px -10px rgba(80, 55, 25, 0.22);
+  --shadow-lg: 0 24px 60px -18px rgba(60, 40, 15, 0.35), 0 2px 6px rgba(60, 40, 15, 0.08);
+
+  --nc-cinnabar: #c0533a;
+  --nc-ochre: #b98a2a;
+  --nc-jade: #3d8a6c;
+  --nc-indigo: #4867ad;
+  --nc-violet: #8a5aa6;
+  --nc-stone: #7b7166;
+
+  --cat-arg: #b8492f;
+  --cat-method: #c08a1f;
+  --cat-struct: #4565a8;
+  --cat-expr: #2f8277;
+  --cat-rhet: #8b55a8;
+  --cat-craft: #b5577d;
+  --cat-tone: #6f7f34;
+  --cat-issue: #c23b3b;
+  --cat-other: #8a8072;
+}
+
+/* 素白 */
+[data-theme='su'] {
+  color-scheme: light;
+  --bg: #fafaf8;
+  --bg-elev: #ffffff;
+  --bg-sunken: #f3f3f0;
+  --bg-card-2: #fbfbf9;
+  --bg-hover: rgba(20, 24, 32, 0.05);
+  --ink: #1d1f23;
+  --ink-2: #4d525b;
+  --ink-3: #8d929b;
+  --line: #e7e7e2;
+  --line-strong: #d3d3cc;
+  --accent: #3d5a98;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(61, 90, 152, 0.09);
+  --sel: rgba(61, 90, 152, 0.15);
+  --code-bg: rgba(20, 24, 32, 0.05);
+  --shadow: 0 1px 2px rgba(20, 24, 32, 0.04), 0 6px 22px -10px rgba(20, 24, 32, 0.18);
+  --shadow-lg: 0 24px 60px -18px rgba(20, 24, 32, 0.3), 0 2px 6px rgba(20, 24, 32, 0.06);
+
+  --nc-cinnabar: #c9533e;
+  --nc-ochre: #b98a22;
+  --nc-jade: #2f8a64;
+  --nc-indigo: #3d5fb0;
+  --nc-violet: #8656ad;
+  --nc-stone: #6f747c;
+
+  --cat-arg: #c2462e;
+  --cat-method: #c28a14;
+  --cat-struct: #3c62b4;
+  --cat-expr: #23877a;
+  --cat-rhet: #8a50b0;
+  --cat-craft: #c0507e;
+  --cat-tone: #6b7d2a;
+  --cat-issue: #d03737;
+  --cat-other: #7e848c;
+}
+
+/* 青瓷 */
+[data-theme='celadon'] {
+  color-scheme: light;
+  --bg: #ecf1eb;
+  --bg-elev: #f6f9f4;
+  --bg-sunken: #e2e9e1;
+  --bg-card-2: #f0f4ee;
+  --bg-hover: rgba(30, 60, 50, 0.06);
+  --ink: #1e2925;
+  --ink-2: #4a5953;
+  --ink-3: #85948e;
+  --line: #d4ddd4;
+  --line-strong: #bccabd;
+  --accent: #2f6f62;
+  --accent-ink: #f3f8f4;
+  --accent-soft: rgba(47, 111, 98, 0.1);
+  --sel: rgba(47, 111, 98, 0.16);
+  --code-bg: rgba(30, 60, 50, 0.06);
+  --shadow: 0 1px 2px rgba(30, 60, 50, 0.04), 0 6px 22px -10px rgba(30, 60, 50, 0.2);
+  --shadow-lg: 0 24px 60px -18px rgba(20, 45, 38, 0.32), 0 2px 6px rgba(20, 45, 38, 0.07);
+
+  --nc-cinnabar: #b9573f;
+  --nc-ochre: #ad8a2e;
+  --nc-jade: #2f7f63;
+  --nc-indigo: #3f679f;
+  --nc-violet: #7d5a9c;
+  --nc-stone: #6e7a74;
+
+  --cat-arg: #b44c33;
+  --cat-method: #b58622;
+  --cat-struct: #3f66a3;
+  --cat-expr: #217a6d;
+  --cat-rhet: #7f539f;
+  --cat-craft: #ac5578;
+  --cat-tone: #607a33;
+  --cat-issue: #bf3e3e;
+  --cat-other: #7b8781;
+}
+
+/* 暮山（暖色深色） */
+[data-theme='dusk'] {
+  color-scheme: dark;
+  --bg: #1d1b19;
+  --bg-elev: #262321;
+  --bg-sunken: #181614;
+  --bg-card-2: #2b2825;
+  --bg-hover: rgba(255, 235, 205, 0.06);
+  --ink: #e9e1d3;
+  --ink-2: #b7ad9d;
+  --ink-3: #7e7468;
+  --line: #36312c;
+  --line-strong: #4a443d;
+  --accent: #d6a05d;
+  --accent-ink: #1d1b19;
+  --accent-soft: rgba(214, 160, 93, 0.12);
+  --sel: rgba(214, 160, 93, 0.22);
+  --code-bg: rgba(255, 235, 205, 0.06);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.3);
+
+  --nc-cinnabar: #e07a5f;
+  --nc-ochre: #dbb15a;
+  --nc-jade: #6dbb98;
+  --nc-indigo: #7f9fe0;
+  --nc-violet: #b98ad6;
+  --nc-stone: #a59a8c;
+
+  --cat-arg: #e5805f;
+  --cat-method: #e0b552;
+  --cat-struct: #7fa0e3;
+  --cat-expr: #5fc0b0;
+  --cat-rhet: #bd8be0;
+  --cat-craft: #e488ac;
+  --cat-tone: #aac163;
+  --cat-issue: #f06a6a;
+  --cat-other: #a0968a;
+}
+
+/* 墨夜（冷色深色） */
+[data-theme='ink'] {
+  color-scheme: dark;
+  --bg: #14161a;
+  --bg-elev: #1b1e23;
+  --bg-sunken: #101215;
+  --bg-card-2: #20242a;
+  --bg-hover: rgba(200, 215, 240, 0.06);
+  --ink: #dde1e7;
+  --ink-2: #a5adb9;
+  --ink-3: #6b7380;
+  --line: #2a2f37;
+  --line-strong: #3a414c;
+  --accent: #8bb0e6;
+  --accent-ink: #12151a;
+  --accent-soft: rgba(139, 176, 230, 0.12);
+  --sel: rgba(139, 176, 230, 0.22);
+  --code-bg: rgba(200, 215, 240, 0.06);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.75), 0 2px 6px rgba(0, 0, 0, 0.35);
+
+  --nc-cinnabar: #e8806a;
+  --nc-ochre: #e0bb63;
+  --nc-jade: #6cc19e;
+  --nc-indigo: #86a8ec;
+  --nc-violet: #bf95e4;
+  --nc-stone: #9aa2ad;
+
+  --cat-arg: #ec8466;
+  --cat-method: #e3bb5b;
+  --cat-struct: #86a8ec;
+  --cat-expr: #5fc4b4;
+  --cat-rhet: #c497e8;
+  --cat-craft: #ea8fb4;
+  --cat-tone: #b0c86a;
+  --cat-issue: #f37272;
+  --cat-other: #98a0aa;
+}

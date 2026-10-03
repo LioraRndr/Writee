@@ -1,0 +1,11 @@
+node_modules
+dist
+.vite
+*.log
+.DS_Store
+
+# 本机密钥与同步临时文件
+.env
+.env.*
+!.env.example
+*.partial

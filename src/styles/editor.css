@@ -1,0 +1,466 @@
+/* ---------- CodeMirror 基础 ---------- */
+.cm-editor {
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: var(--fs);
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-scroller {
+  font-family: inherit !important;
+  line-height: var(--lh) !important;
+  overflow: visible !important;
+}
+.cm-content {
+  padding: 0 !important;
+  caret-color: var(--accent);
+  font-variant-east-asian: proportional-width;
+  font-feature-settings: 'kern', 'liga', 'palt' 0;
+  letter-spacing: 0.012em;
+  text-align: justify;
+  hyphens: auto;
+}
+.cm-line {
+  padding: 0 !important;
+}
+.cm-cursor,
+.cm-dropCursor {
+  border-left: 2px solid var(--accent) !important;
+}
+.cm-selectionBackground,
+.cm-focused .cm-selectionBackground,
+.cm-content ::selection {
+  background: var(--sel) !important;
+}
+.cm-placeholder {
+  color: var(--ink-3);
+  font-style: normal;
+}
+.cm-gutters {
+  display: none !important;
+}
+.cm-selectionMatch {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.cm-searchMatch {
+  background: color-mix(in srgb, var(--nc-ochre) 30%, transparent);
+  border-radius: 2px;
+}
+.cm-searchMatch-selected {
+  background: color-mix(in srgb, var(--nc-ochre) 55%, transparent);
+}
+
+/* 搜索面板 */
+.cm-panels {
+  background: var(--bg-elev) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  position: sticky !important;
+  top: 8px;
+  margin-bottom: 16px;
+  z-index: 10;
+}
+.cm-panels-top {
+  border-bottom: 0 !important;
+}
+.cm-search {
+  padding: 8px 10px !important;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.cm-search input.cm-textfield {
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: var(--bg);
+  font-size: 12.5px;
+  outline: none;
+}
+.cm-search input.cm-textfield:focus {
+  border-color: var(--accent);
+}
+.cm-search button {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 9px;
+  background: var(--bg) !important;
+  background-image: none !important;
+  font-size: 12px;
+}
+.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-2);
+}
+.cm-search button[name='close'] {
+  border: 0;
+  font-size: 16px;
+  color: var(--ink-3);
+}
+
+/* ---------- 实时预览排版 ---------- */
+.cm-h {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--ink);
+}
+.cm-h1 {
+  font-size: 1.9em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding-top: 0.4em !important;
+  padding-bottom: 0.15em !important;
+}
+.cm-h2 {
+  font-size: 1.42em;
+  padding-top: 0.75em !important;
+  padding-bottom: 0.05em !important;
+}
+.cm-h3 {
+  font-size: 1.2em;
+  padding-top: 0.5em !important;
+}
+.cm-h4 {
+  font-size: 1.07em;
+  padding-top: 0.35em !important;
+}
+.cm-h5,
+.cm-h6 {
+  font-size: 1em;
+  color: var(--ink-2);
+  padding-top: 0.25em !important;
+}
+.cm-md-mark {
+  color: var(--ink-3);
+  opacity: 0.75;
+  font-weight: 400;
+}
+.cm-md-hmark {
+  font-family: var(--font-mono);
+  font-size: 0.6em;
+  letter-spacing: 0;
+  vertical-align: 0.25em;
+  margin-right: 0.2em;
+}
+.cm-md-strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+.cm-md-em {
+  font-style: italic;
+}
+.cm-md-strike {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-3);
+  color: var(--ink-2);
+}
+.cm-md-code-inline {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+.cm-md-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-underline-offset: 0.22em;
+  cursor: text;
+}
+.cm-md-url {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+}
+.cm-md-quote {
+  border-left: 3px solid var(--line-strong);
+  padding-left: 1.1em !important;
+  color: var(--ink-2);
+}
+.cm-md-li {
+  padding-left: calc(var(--li-depth, 0) * 1.6em + 1.6em) !important;
+  text-indent: -1.6em;
+}
+.cm-md-li > * {
+  text-indent: 0;
+}
+.cm-md-bullet,
+.cm-md-olnum {
+  display: inline-block;
+  width: 1.6em;
+  text-indent: 0;
+  color: var(--accent);
+}
+.cm-md-bullet {
+  text-align: center;
+  padding-right: 0.3em;
+}
+.cm-md-olnum {
+  font-family: var(--font-serif);
+  font-feature-settings: 'tnum';
+  text-align: left;
+  font-size: 0.95em;
+}
+.cm-md-olmark {
+  color: var(--accent);
+}
+.cm-md-check {
+  display: inline-block;
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.45em 0 0.1em;
+  vertical-align: -0.12em;
+  border: 1.5px solid var(--ink-3);
+  border-radius: 4px;
+  cursor: pointer;
+  text-indent: 0;
+  position: relative;
+}
+.cm-md-check.is-checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.cm-md-check.is-checked::after {
+  content: '';
+  position: absolute;
+  left: 0.28em;
+  top: 0.08em;
+  width: 0.25em;
+  height: 0.5em;
+  border: solid var(--accent-ink);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.cm-md-done {
+  color: var(--ink-3);
+}
+.cm-md-hr-line {
+  text-align: center;
+}
+.cm-md-hr {
+  display: inline-block;
+  width: 100%;
+  height: 1px;
+  vertical-align: middle;
+  background: linear-gradient(90deg, transparent, var(--line-strong) 20%, var(--line-strong) 80%, transparent);
+}
+.cm-md-codeblock {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  line-height: 1.75;
+  letter-spacing: 0;
+  text-align: left;
+  background: var(--code-bg);
+  padding: 0 1.1em !important;
+}
+.cm-md-codeblock.is-first {
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+  padding-top: 0.5em !important;
+}
+.cm-md-codeblock.is-last {
+  border-bottom-left-radius: 9px;
+  border-bottom-right-radius: 9px;
+  padding-bottom: 0.5em !important;
+}
+.cm-md-fence {
+  font-size: 0.9em;
+}
+.cm-md-html {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+}
+.cm-md-image {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+.cm-md-image img {
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 8px;
+  display: block;
+  margin: 0.3em 0;
+}
+.cm-md-image.is-broken {
+  color: var(--ink-3);
+  font-size: 0.85em;
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
+  padding: 0 0.5em;
+}
+.cm-md-table {
+  margin: 0.4em 0 0.8em;
+  overflow-x: auto;
+  cursor: text;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.cm-md-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+  line-height: 1.7;
+}
+.cm-md-table th,
+.cm-md-table td {
+  padding: 0.45em 0.9em;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.cm-md-table th {
+  font-weight: 600;
+  background: var(--bg-sunken);
+}
+.cm-md-table tr:last-child td {
+  border-bottom: 0;
+}
+.cm-md-table tr + tr td {
+  border-top: 0;
+}
+.cm-md-table code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+}
+
+/* ---------- 标签（注释） ---------- */
+.wt-tag {
+  --tc: var(--ink-3);
+  background: color-mix(in srgb, var(--tc) 13%, transparent);
+  border-bottom: 1.5px solid color-mix(in srgb, var(--tc) 55%, transparent);
+  border-radius: 2px;
+  transition: background 0.15s;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.wt-tag.is-bare {
+  background: transparent;
+  border-bottom: 1.5px dashed color-mix(in srgb, var(--ink-3) 70%, transparent);
+}
+.wt-tag.is-hover,
+.wt-tag.is-active {
+  background: color-mix(in srgb, var(--tc) 26%, transparent);
+  border-bottom-color: var(--tc);
+}
+.wt-tag.is-linking {
+  background: color-mix(in srgb, var(--tc) 30%, transparent);
+  outline: 1.5px dashed var(--tc);
+  outline-offset: 1px;
+}
+.wt-tag.is-dim {
+  background: color-mix(in srgb, var(--tc) 6%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--tc) 25%, transparent);
+}
+.wt-badge {
+  --tc: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.32em;
+  height: 1.32em;
+  padding: 0 0.32em;
+  margin: 0 0.12em 0 0.18em;
+  border-radius: 999px;
+  background: var(--tc);
+  color: #fff;
+  font: 600 0.6em/1 var(--font-ui);
+  letter-spacing: 0;
+  text-indent: 0;
+  vertical-align: 0.62em;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s var(--ease), box-shadow 0.15s;
+}
+[data-theme='dusk'] .wt-badge,
+[data-theme='ink'] .wt-badge {
+  color: var(--bg);
+}
+.wt-badge.is-bare {
+  background: transparent;
+  color: var(--ink-3);
+  box-shadow: inset 0 0 0 1.2px var(--ink-3);
+}
+.wt-badge:hover,
+.wt-badge.is-hover,
+.wt-badge.is-active,
+.wt-badge.is-linking {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tc) 25%, transparent);
+}
+.wt-badge.is-dim {
+  opacity: 0.45;
+}
+
+/* ---------- 结构分析单元 ---------- */
+.wt-unit {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--uc) 55%, transparent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.38em;
+  text-decoration-skip-ink: none;
+}
+.wt-unit.is-active {
+  background: color-mix(in srgb, var(--uc) 12%, transparent);
+  text-decoration-color: var(--uc);
+  border-radius: 2px;
+}
+.wt-unit.is-dim {
+  text-decoration-color: transparent;
+}
+.wt-unit-start {
+  display: inline-block;
+  width: 2px;
+  height: 0.8em;
+  margin: 0 0.16em 0 0.04em;
+  vertical-align: -0.04em;
+  border-radius: 2px;
+  background: var(--uc);
+  opacity: 0.6;
+  text-indent: 0;
+}
+.wt-unit-start.is-active {
+  width: 5px;
+  opacity: 1;
+}
+
+/* ---------- 修改痕迹 ---------- */
+.wt-edited {
+  background-image: linear-gradient(90deg, var(--accent) 50%, transparent 50%);
+  background-size: 5px 1px;
+  background-repeat: repeat-x;
+  background-position: 0 92%;
+}
+.wt-edit-point {
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  vertical-align: -0.15em;
+  border-left: 1.5px dotted var(--accent);
+  margin: 0 1px;
+}
+
+/* 主编辑器 */
+.main-editor {
+  min-height: 60vh;
+}
+
+.cm-blank {
+  line-height: 1.05 !important;
+}
+.cm-md-codeblock.cm-blank {
+  line-height: 1.75 !important;
+}

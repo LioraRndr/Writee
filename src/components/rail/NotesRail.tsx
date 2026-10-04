@@ -437,6 +437,7 @@ const NoteCard = memo(function NoteCard({
           {selected && <IconCheck size={11} />}
         </button>
         <div className="note-tags">
+          {sortedTags.length === 0 && <span className="muted small" title="原文可能已改写；点击 + 重新关联文字">待重新定位</span>}
           {sortedTags.map((t) => (
             <span
               key={t.id}

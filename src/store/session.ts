@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { useDoc } from './docStore'
 import { useUI } from './uiStore'
-import type { DocArchive, DocData, DocIndexEntry } from '../core/types'
-import { deleteArchive, findArchiveByHandle, findArchiveByName, loadArchive, loadIndex, saveArchive } from '../core/archive'
+import type { DocArchive, DocData, DocIndexEntry, FileLocation } from '../core/types'
+import { deleteArchive, findArchiveByHandle, findArchiveByName, findArchiveByLocation, handleAtLocation, locateFile, locationRoot, loadArchive, loadIndex, saveArchive, saveRoot } from '../core/archive'
 import {
   downloadText,
   fsaSupported,
@@ -33,7 +33,61 @@ interface SessionState {
 export const useSession = create<SessionState>()(() => ({ recent: [], conflict: null, loading: false }))
 
 /** 当前文档与磁盘同步的状态 */
-let sess: { id: string; diskText: string; diskModified: number | undefined; created: number } | null = null
+let sess: { id: string; diskText: string; diskModified: number | undefined; created: number; location?: FileLocation } | null = null
+
+export function currentLocation() {
+  return sess?.location
+}
+
+/** 授权后把仍能识别的旧存档迁移到稳定路径，不靠同名猜测。 */
+export async function registerWorkspace(handle: FileSystemDirectoryHandle) {
+  if (!(await requestPermission(handle, 'readwrite'))) throw new Error('未获得工作目录权限')
+  await persistNow()
+  const root = await saveRoot(handle)
+  for (const entry of await loadIndex()) {
+    const a = await loadArchive(entry.id)
+    if (!a?.handle || a.location) continue
+    let path: string[] | null = null
+    try { path = await handle.resolve(a.handle) } catch { /* 已失效的旧文件需手动关联 */ }
+    if (!path?.length) continue
+    const location = { rootId: root.id, path }
+    if (await findArchiveByLocation([location])) continue
+    // 当前文档可能仍在编辑，使用实时状态保存，避免覆盖刚写下的注释。
+    if (sess?.id === a.id) {
+      sess.location = location
+      await persistNow()
+    } else await saveArchive({ ...a, location })
+  }
+  await refreshRecent()
+  return root
+}
+
+/** 用户明确选择目标文件后，迁移当前存档；已有目标存档不静默覆盖。 */
+export async function relinkCurrent(handle: FileSystemFileHandle) {
+  const id = sess?.id
+  if (!id || id === 'sample') throw new Error('请先打开要恢复的旧存档')
+  const locations = await locateFile(handle)
+  if (!locations.length) throw new Error('请先授权包含此文件的工作目录')
+  const existing = await findArchiveByLocation(locations) ?? await findArchiveByHandle(handle)
+  if (existing && existing.id !== id) throw new Error('目标文件已有另一份存档。请先从最近的文档移除不需要的目标存档，再重新关联；原文件不会被删除。')
+  if (!(await requestPermission(handle, 'readwrite'))) throw new Error('未获得文件写入权限')
+  const disk = await readHandle(handle)
+  if (sess?.id !== id) return
+  await persistNow()
+  const archive = await loadArchive(id)
+  if (!archive || sess?.id !== id) return
+  useUI.setState({ dialog: null })
+  await openArchiveData(archive, id, handle.name, handle, disk.text, disk.modified, locations[0])
+}
+
+async function sessionHandle(current: NonNullable<typeof sess>, fallback: FileSystemFileHandle) {
+  const handle = current.location ? await handleAtLocation(current.location) : fallback
+  const meta = useDoc.getState().meta
+  if (sess === current && meta?.id === current.id && meta.handle !== handle) {
+    useDoc.setState({ meta: { ...meta, handle } })
+  }
+  return handle
+}
 
 const emptyData = (text: string): DocData => ({ text, tags: [], notes: [], edits: [], analysis: null, anchors: [] })
 
@@ -62,8 +116,11 @@ async function openArchiveData(
   handle: FileSystemFileHandle | null,
   diskText: string,
   modified: number | undefined,
+  location: FileLocation | undefined,
 ) {
-  sess = { id, diskText, diskModified: modified, created: a?.created ?? Date.now() }
+  clearTimeout(writeTimer)
+  useSession.setState({ conflict: null })
+  sess = { id, diskText, diskModified: modified, created: a?.created ?? Date.now(), location }
   restoreUI(a)
   const doc = useDoc.getState()
   if (!a) {
@@ -76,6 +133,9 @@ async function openArchiveData(
         useDoc.getState().replaceText(diskText, 'disk')
         useUI.getState().toast('文件在外部被修改过，已载入新版本，注释已自动对齐')
       } else {
+        // 冲突未处理前保存共同基线，刷新后仍须提示，不能把旧稿当成待写回的新稿。
+        sess.diskText = a.diskText
+        sess.diskModified = a.diskModified
         useSession.setState({ conflict: { diskText, modified: modified ?? 0 } })
         useDoc.getState().setFileStatus('conflict')
         useUI.setState({ dialog: 'conflict' })
@@ -85,7 +145,9 @@ async function openArchiveData(
       scheduleWrite()
     }
   }
-  if (handle && !(await hasPermission(handle, 'readwrite'))) useDoc.getState().setFileStatus('nopermission')
+  if (handle && !(await hasPermission(handle, 'readwrite')) && !useSession.getState().conflict) {
+    useDoc.getState().setFileStatus('nopermission')
+  }
   await persistNow()
 }
 
@@ -98,8 +160,12 @@ export async function openFromHandle(handle: FileSystemFileHandle) {
       if (!(await requestPermission(handle, 'read'))) throw new Error('没有读取该文件的权限')
     }
     const { text, modified } = await readHandle(handle)
-    const a = await findArchiveByHandle(handle)
-    await openArchiveData(a, a?.id ?? uid('d'), handle.name, handle, text, modified)
+    await persistNow()
+    const locations = await locateFile(handle)
+    const pathArchive = await findArchiveByLocation(locations)
+    const a = pathArchive ?? await findArchiveByHandle(handle)
+    const location = pathArchive?.location ?? locations[0]
+    await openArchiveData(a, a?.id ?? uid('d'), handle.name, handle, text, modified, location)
   } catch (e) {
     useUI.getState().toast('打开失败：' + (e instanceof Error ? e.message : String(e)), { tone: 'error' })
   } finally {
@@ -136,24 +202,29 @@ export async function openDialog() {
 }
 
 export async function openRecent(id: string) {
+  await persistNow()
   const a = await loadArchive(id)
   if (!a) {
     useUI.getState().toast('找不到这份存档', { tone: 'error' })
     await refreshRecent()
     return
   }
-  if (a.handle) {
-    const ok = await requestPermission(a.handle, 'readwrite')
+  if (a.handle || a.location) {
     try {
-      const { text, modified } = await readHandle(a.handle)
-      await openArchiveData(a, a.id, a.handle.name, a.handle, text, modified)
-      if (!ok) useDoc.getState().setFileStatus('nopermission')
+      const permissionHandle = a.location ? await locationRoot(a.location) : a.handle!
+      const ok = await requestPermission(permissionHandle, 'readwrite')
+      const handle = a.location ? await handleAtLocation(a.location) : a.handle!
+      const { text, modified } = await readHandle(handle)
+      await openArchiveData(a, a.id, handle.name, handle, text, modified, a.location)
+      if (!ok && !useSession.getState().conflict) useDoc.getState().setFileStatus('nopermission')
       return
     } catch {
       useUI.getState().toast('原文件无法访问（可能已移动或删除），已打开存档中的版本', { tone: 'error', ms: 6000 })
     }
   }
-  sess = { id: a.id, diskText: a.diskText, diskModified: undefined, created: a.created }
+  clearTimeout(writeTimer)
+  useSession.setState({ conflict: null })
+  sess = { id: a.id, diskText: a.diskText, diskModified: undefined, created: a.created, location: a.location }
   restoreUI(a)
   useDoc.getState().open({ id: a.id, name: a.name, handle: null, created: a.created }, a.data)
   await persistNow()
@@ -196,7 +267,7 @@ export async function saveAs() {
   const modified = await writeHandle(h, doc.data.text)
   // 另存后成为新的独立文档存档（保留注释）
   const id = doc.meta.id === 'sample' ? uid('d') : doc.meta.id
-  sess = { id, diskText: doc.data.text, diskModified: modified, created: doc.meta.created }
+  sess = { id, diskText: doc.data.text, diskModified: modified, created: doc.meta.created, location: (await locateFile(h))[0] }
   useDoc.setState({ meta: { ...doc.meta, id, name: h.name, handle: h } })
   useDoc.getState().markSaved(Date.now())
   await persistNow()
@@ -212,13 +283,15 @@ export function downloadCurrent() {
 export async function grantWrite() {
   const h = useDoc.getState().meta?.handle
   if (!h) return
-  if (await requestPermission(h, 'readwrite')) {
+  const target = sess?.location ? await locationRoot(sess.location) : h
+  if (await requestPermission(target, 'readwrite')) {
     useDoc.getState().setFileStatus(useDoc.getState().data.text === sess?.diskText ? 'saved' : 'dirty')
     scheduleWrite(0)
   } else useUI.getState().toast('未获得写入权限', { tone: 'error' })
 }
 
 export function closeDoc() {
+  clearTimeout(writeTimer)
   void persistNow()
   sess = null
   useDoc.getState().close()
@@ -245,6 +318,7 @@ function buildArchive(): DocArchive | null {
     id: sess.id,
     name: doc.meta.name,
     handle: doc.meta.handle ?? undefined,
+    location: sess.location,
     data: doc.data,
     diskText: sess.diskText,
     diskModified: sess.diskModified,
@@ -278,35 +352,38 @@ export function scheduleWrite(ms = 700) {
 export async function writeNow() {
   clearTimeout(writeTimer)
   const doc = useDoc.getState()
-  const h = doc.meta?.handle
-  if (!h || !sess || writing) return
+  const fallback = doc.meta?.handle
+  const current = sess
+  if (!fallback || !current || writing) return
   if (doc.fileStatus === 'conflict') return
-  if (!(await hasPermission(h, 'readwrite'))) {
-    useDoc.getState().setFileStatus('nopermission')
-    return
-  }
   const text = doc.data.text
-  if (text === sess.diskText) {
+  if (text === current.diskText) {
     if (doc.fileStatus !== 'saved') useDoc.getState().markSaved(Date.now())
     return
   }
   writing = true
   try {
+    const h = await sessionHandle(current, fallback)
+    if (sess !== current) return
+    if (!(await hasPermission(h, 'readwrite'))) {
+      if (sess === current) useDoc.getState().setFileStatus('nopermission')
+      return
+    }
     // 写入前确认文件没有在外部被改动，避免覆盖
-    const m = await statHandle(h)
-    if (sess.diskModified !== undefined && m !== sess.diskModified) {
-      const disk = await readHandle(h)
-      if (disk.text !== sess.diskText) {
-        useSession.setState({ conflict: { diskText: disk.text, modified: disk.modified } })
-        useDoc.getState().setFileStatus('conflict')
-        useUI.setState({ dialog: 'conflict' })
-        return
-      }
+    // 路径绑定的文件可能在相同时间戳下被替换，始终核对正文。
+    const disk = await readHandle(h)
+    if (sess !== current) return
+    if (disk.text !== current.diskText) {
+      useSession.setState({ conflict: { diskText: disk.text, modified: disk.modified } })
+      useDoc.getState().setFileStatus('conflict')
+      useUI.setState({ dialog: 'conflict' })
+      return
     }
     useDoc.getState().setFileStatus('saving')
     const modified = await writeHandle(h, text)
-    sess.diskText = text
-    sess.diskModified = modified
+    current.diskText = text
+    current.diskModified = modified
+    if (sess !== current) return
     useDoc.getState().markSaved(Date.now())
     scheduleArchive(100)
     if (useDoc.getState().data.text !== text) {
@@ -314,42 +391,48 @@ export async function writeNow() {
       scheduleWrite(300)
     }
   } catch (e) {
-    useDoc.getState().setFileStatus('error', e instanceof Error ? e.message : String(e))
+    if (sess === current) useDoc.getState().setFileStatus('error', e instanceof Error ? e.message : String(e))
   } finally {
     writing = false
   }
 }
 
 /** 检查文件是否在外部被修改 */
+let checking = false
 export async function checkDisk() {
   const doc = useDoc.getState()
-  const h = doc.meta?.handle
-  if (!h || !sess || writing || doc.fileStatus === 'conflict') return
-  if (!(await hasPermission(h, 'read'))) return
-  let m: number
+  const fallback = doc.meta?.handle
+  const current = sess
+  if (!fallback || !current || writing || checking || doc.fileStatus === 'conflict') return
+  checking = true
   try {
-    m = await statHandle(h)
+    const h = await sessionHandle(current, fallback)
+    if (!(await hasPermission(h, 'read'))) return
+    const m = await statHandle(h)
+    if (!current.location && m === current.diskModified) return
+    const disk = await readHandle(h)
+    if (sess !== current || writing || useDoc.getState().fileStatus === 'conflict') return
+    if (disk.text === current.diskText) {
+      current.diskModified = disk.modified
+      return
+    }
+    if (useDoc.getState().data.text === current.diskText) {
+      current.diskText = disk.text
+      current.diskModified = disk.modified
+      useDoc.getState().replaceText(disk.text, 'disk')
+      useDoc.getState().markSaved(Date.now())
+      useUI.getState().toast('已载入文件的外部修改，注释已自动对齐', {
+        action: { label: '撤销', run: () => useDoc.getState().undo() },
+      })
+    } else {
+      useSession.setState({ conflict: { diskText: disk.text, modified: disk.modified } })
+      useDoc.getState().setFileStatus('conflict')
+      useUI.setState({ dialog: 'conflict' })
+    }
   } catch {
-    return
-  }
-  if (m === sess.diskModified) return
-  const disk = await readHandle(h)
-  if (disk.text === sess.diskText) {
-    sess.diskModified = disk.modified
-    return
-  }
-  if (useDoc.getState().data.text === sess.diskText) {
-    sess.diskText = disk.text
-    sess.diskModified = disk.modified
-    useDoc.getState().replaceText(disk.text, 'disk')
-    useDoc.getState().markSaved(Date.now())
-    useUI.getState().toast('已载入文件的外部修改，注释已自动对齐', {
-      action: { label: '撤销', run: () => useDoc.getState().undo() },
-    })
-  } else {
-    useSession.setState({ conflict: { diskText: disk.text, modified: disk.modified } })
-    useDoc.getState().setFileStatus('conflict')
-    useUI.setState({ dialog: 'conflict' })
+    // 外部替换期间文件可能短暂消失，保留存档，下一次轮询继续尝试。
+  } finally {
+    checking = false
   }
 }
 

@@ -77,7 +77,7 @@ export interface UIState {
   activeUnit: string | null
   hiddenCats: string[]
   collapsed: string[]
-  dialog: null | 'copy' | 'settings' | 'ai' | 'analysisImport' | 'conflict' | 'format'
+  dialog: null | 'copy' | 'settings' | 'ai' | 'analysisImport' | 'conflict' | 'format' | 'workspace'
   toasts: Toast[]
   /** 当前光标所在的标题 id（用于大纲高亮） */
   currentSection: string | null

@@ -79,11 +79,23 @@ export interface DocUIState {
   collapsed: string[]
 }
 
+/** 授权目录的持久 ID 与目录内相对路径，不随正文或文件替换变化。 */
+export interface FileLocation {
+  rootId: string
+  path: string[]
+}
+
+export interface WorkspaceRoot {
+  id: string
+  handle: FileSystemDirectoryHandle
+}
+
 /** IndexedDB 中每篇文档的存档 */
 export interface DocArchive {
   id: string
   name: string
   handle?: FileSystemFileHandle
+  location?: FileLocation
   data: DocData
   /** 上次与磁盘同步时的文本 */
   diskText: string

@@ -11,6 +11,7 @@ import { Toasts } from './components/Toasts'
 import { CopyDialog } from './components/dialogs/CopyDialog'
 import { SettingsDialog } from './components/dialogs/SettingsDialog'
 import { AIDialog } from './components/dialogs/AIDialog'
+import { WorkspaceDialog } from './components/dialogs/WorkspaceDialog'
 import { ConflictDialog, FormatDialog, ImportAnalysisDialog } from './components/dialogs/MiscDialogs'
 
 function isEditable(el: Element | null) {
@@ -151,6 +152,7 @@ export default function App() {
       {dialog === 'copy' && <CopyDialog />}
       {dialog === 'settings' && <SettingsDialog />}
       {dialog === 'ai' && <AIDialog />}
+      {dialog === 'workspace' && <WorkspaceDialog />}
       {dialog === 'analysisImport' && <ImportAnalysisDialog />}
       {dialog === 'format' && <FormatDialog />}
       {dialog === 'conflict' && <ConflictDialog />}

@@ -100,6 +100,7 @@ export function TopBar() {
             }
             items={[
               { label: '打开…', hint: MOD + 'O', onSelect: () => void openDialog() },
+              { label: '工作目录…', onSelect: () => useUI.setState({ dialog: 'workspace' }) },
               { label: '新建…', onSelect: () => void newDocument() },
               { divider: true, label: '' },
               {

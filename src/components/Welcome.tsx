@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useSession, refreshRecent, openDialog, openRecent, openSample, newDocument, forgetArchive } from '../store/session'
 import { fsaSupported } from '../core/fileAccess'
+import { useUI } from '../store/uiStore'
 import { Menu } from './Menu'
 import { IconFile, IconFolder, IconMore, IconPlus, IconSpark } from './icons'
 
@@ -29,6 +30,9 @@ export function Welcome() {
           打开一篇本地 Markdown 文章：在原文件上实时编辑，按标题切成卡片调整结构，框选文字写下注释，再一键整理给 AI。
         </p>
         <div className="welcome-actions">
+          {fsaSupported && <button className="btn lg" onClick={() => useUI.setState({ dialog: 'workspace' })} disabled={loading}>
+            <IconFolder size={17} /> 工作目录
+          </button>}
           <button className="btn is-primary lg" onClick={() => void openDialog()} disabled={loading}>
             <IconFolder size={17} /> 打开 Markdown 文件
           </button>

@@ -49,4 +49,26 @@ export default async function ({ page }) {
     return s.data.analysis.units.map((u) => [s.data.text.slice(u.from, u.to), u.tags])
   })
   assertEq(units, [['许多 AI 生成的文章读起来行云流水，却经不起追问。', ['arg.evidence-fact', 'issue.overgeneral']]], '手动结构标注')
+
+  // 检查主编辑器和卡片的原生光标，防止 CodeMirror 默认黑色覆盖主题
+  for (const mode of ['编辑', '卡片']) {
+    await page.getByRole('button', { name: mode, exact: true }).click()
+    for (const theme of ['xuan', 'su', 'celadon', 'dusk', 'ink']) {
+      await page.evaluate((theme) => window.__writee.useUI.getState().setSettings({ theme }), theme)
+      await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, theme)
+      const content = page.locator('.cm-content').first()
+      await content.click()
+      const colors = await content.evaluate((el) => {
+        const expected = document.createElement('span')
+        expected.style.color = 'var(--accent)'
+        document.body.appendChild(expected)
+        const result = { caret: getComputedStyle(el).caretColor, accent: getComputedStyle(expected).color }
+        expected.remove()
+        return result
+      })
+      assertEq(colors.caret, colors.accent, `${mode} / ${theme} 光标应采用主题强调色`)
+      assert(colors.caret !== 'rgb(0, 0, 0)', `${mode} / ${theme} 光标不应为黑色`)
+      if (theme === 'dusk' || theme === 'ink') await shot(page, `caret-${mode === '编辑' ? 'editor' : 'cards'}-${theme}`)
+    }
+  }
 }

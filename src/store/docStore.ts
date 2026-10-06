@@ -301,7 +301,13 @@ export const useDoc = create<DocState>()((set, get) => {
     removeNotes(ids) {
       const s = get()
       const set_ = new Set(ids)
-      commitMeta({ ...s.data, notes: s.data.notes.filter((n) => !set_.has(n.id)) })
+      const notes = s.data.notes.filter((n) => !set_.has(n.id))
+      if (notes.length === s.data.notes.length) return
+      const removedTags = new Set(s.data.notes.filter((n) => set_.has(n.id)).flatMap((n) => n.tagIds))
+      const linkedTags = new Set(notes.flatMap((n) => n.tagIds))
+      // 只清理被删注释留下的标签，共用标签和独立创建的标签继续保留
+      const tags = s.data.tags.filter((t) => !removedTags.has(t.id) || linkedTags.has(t.id))
+      commitMeta({ ...s.data, notes, tags })
     },
 
     linkTag(noteId, tagId) {

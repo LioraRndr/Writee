@@ -15,7 +15,8 @@
 }
 .cm-content {
   padding: 0 !important;
-  caret-color: var(--accent);
+  /* 覆盖 CodeMirror 默认的黑色原生光标，主编辑器和卡片均跟随主题 */
+  caret-color: var(--accent) !important;
   font-variant-east-asian: proportional-width;
   font-feature-settings: 'kern', 'liga', 'palt' 0;
   letter-spacing: 0.012em;

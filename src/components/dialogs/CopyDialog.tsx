@@ -9,14 +9,18 @@ import { IconCheck, IconCopy } from '../icons'
 
 const OPTS_KEY = 'writee.copyopts'
 
-function loadOpts(): CopyOptions {
+interface CopyDialogOptions extends CopyOptions {
+  clearAfterCopy: boolean
+}
+
+function loadOpts(): CopyDialogOptions {
   try {
     const raw = localStorage.getItem(OPTS_KEY)
-    if (raw) return { scope: 'paragraphs', instruction: '', listEdits: true, ...JSON.parse(raw) }
+    if (raw) return { scope: 'paragraphs', instruction: '', listEdits: true, clearAfterCopy: false, ...JSON.parse(raw) }
   } catch {
     /* ignore */
   }
-  return { scope: 'paragraphs', instruction: '', listEdits: true }
+  return { scope: 'paragraphs', instruction: '', listEdits: true, clearAfterCopy: false }
 }
 
 const SCOPES: { id: CopyScope; label: string; desc: string }[] = [
@@ -33,11 +37,12 @@ export function CopyDialog() {
   const [ids, setIds] = useState<string[]>(() =>
     preselected.length ? preselected : data.notes.filter((n) => !n.resolved).map((n) => n.id),
   )
-  const [opts, setOpts] = useState<CopyOptions>(loadOpts)
+  const [opts, setOpts] = useState<CopyDialogOptions>(loadOpts)
   const [copied, setCopied] = useState(false)
+  const [copying, setCopying] = useState(false)
   const info = tagInfo(data)
 
-  const update = (p: Partial<CopyOptions>) => {
+  const update = (p: Partial<CopyDialogOptions>) => {
     const next = { ...opts, ...p }
     setOpts(next)
     localStorage.setItem(OPTS_KEY, JSON.stringify(next))
@@ -53,9 +58,33 @@ export function CopyDialog() {
   const close = () => useUI.setState({ dialog: null })
 
   const doCopy = async () => {
-    await copyText(prompt)
+    if (copying || copied) return
+    const docId = useDoc.getState().meta?.id
+    const copiedIds = ids.filter((id) => data.notes.some((n) => n.id === id))
+    setCopying(true)
+    try {
+      if (!(await copyText(prompt))) throw new Error('复制失败')
+    } catch {
+      useUI.getState().toast('复制失败，注释已保留，请重试或手动复制预览内容', { tone: 'error' })
+      setCopying(false)
+      return
+    }
+    setCopying(false)
     setCopied(true)
-    useUI.getState().toast(`已复制 ${ids.length} 条注释，可以直接粘贴给 AI`)
+    if (opts.clearAfterCopy && useDoc.getState().meta?.id === docId) {
+      useDoc.getState().removeNotes(copiedIds)
+      const ui = useUI.getState()
+      useUI.setState({
+        selectedNotes: ui.selectedNotes.filter((id) => !copiedIds.includes(id)),
+        activeNote: copiedIds.includes(ui.activeNote ?? '') ? null : ui.activeNote,
+        linkNote: copiedIds.includes(ui.linkNote ?? '') ? null : ui.linkNote,
+      })
+      ui.toast(`已复制并清除 ${copiedIds.length} 条注释`, {
+        action: { label: '撤销清除', run: () => useDoc.getState().undo() },
+      })
+    } else {
+      useUI.getState().toast(`已复制 ${copiedIds.length} 条注释，可以直接粘贴给 AI`)
+    }
     setTimeout(close, 500)
   }
 
@@ -75,7 +104,7 @@ export function CopyDialog() {
           <button className="btn" onClick={close}>
             取消
           </button>
-          <button className="btn is-primary" disabled={!ids.length} onClick={doCopy}>
+          <button className="btn is-primary" disabled={!ids.length || copying || copied} onClick={doCopy}>
             {copied ? <IconCheck size={15} /> : <IconCopy size={15} />} 复制
           </button>
         </>
@@ -151,6 +180,11 @@ export function CopyDialog() {
               列出我手动改过的句子（提醒 AI 不要改回原文）
             </label>
           )}
+          <label className="check-row">
+            <input type="checkbox" checked={opts.clearAfterCopy} onChange={(e) => update({ clearAfterCopy: e.target.checked })} />
+            复制后清除所选注释
+          </label>
+          <p className="muted small">复制成功后删除所选注释及不再共用的序号，可撤销。</p>
         </div>
         <div className="copy-preview">
           <div className="field-label">预览</div>

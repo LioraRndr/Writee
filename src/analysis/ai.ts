@@ -46,6 +46,7 @@ export const PRESETS: Record<ApiFormat, Preset[]> = {
     { name: 'OpenAI', base: 'https://api.openai.com/v1' },
     { name: 'DeepSeek', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
     { name: 'OpenRouter', base: 'https://openrouter.ai/api/v1' },
+    { name: 'Demon Route', base: 'https://api.demonroute.com/v1', model: 'deepseek-v4.1-flash-1017-abliterated' },
     { name: '通义千问', base: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
     { name: 'Kimi', base: 'https://api.moonshot.cn/v1' },
     { name: '智谱 GLM', base: 'https://open.bigmodel.cn/api/paas/v4' },

@@ -91,7 +91,7 @@ npm run preview    # 本地预览 http://localhost:4173
 ### 5. 结构标签分析
 - 以句子为单位（一句或多句）标注：论证要素、论证方法、结构功能、表达方式、修辞、写作技法、语气立场，以及“问题诊断”（论证薄弱、逻辑跳跃、套话/AI 腔……），共 8 类 90 个标签。
 - **BYOK，通用接口**：在“AI 设置”里选择接口格式，填 Base URL、API Key 和模型名即可，官方服务与第三方中转都能接：
-  - **OpenAI 兼容**：请求 `{Base URL}/chat/completions`，如 OpenAI、DeepSeek、OpenRouter、通义千问、Kimi、智谱、硅基流动、本地 Ollama；
+  - **OpenAI 兼容**：请求 `{Base URL}/chat/completions`，如 OpenAI、DeepSeek、OpenRouter、Demon Route、通义千问、Kimi、智谱、硅基流动、本地 Ollama；
   - **Anthropic 兼容**：请求 `{Base URL}/v1/messages`（与 `ANTHROPIC_BASE_URL` 的写法一致），如 Anthropic 官方，或 DeepSeek / Kimi / 智谱等提供的 Anthropic 接口。
   - 提供“快速填写”预设、“获取列表”（读取服务端模型列表）和“测试连接”。
   - 高级：最大输出 tokens、认证方式（x-api-key / Bearer）、额外请求参数（JSON，原样合并进请求体）。

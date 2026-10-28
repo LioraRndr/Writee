@@ -1,3 +1,6 @@
+import type { FileHandle } from './types'
+import { isLocalFile, localFileRequest } from './localFile'
+
 export const fsaSupported = typeof window !== 'undefined' && 'showOpenFilePicker' in window
 
 const MD_TYPES: FilePickerAcceptType[] = [
@@ -23,7 +26,8 @@ export async function pickSaveFile(suggestedName: string): Promise<FileSystemFil
   }
 }
 
-export async function hasPermission(h: FileSystemHandle, mode: 'read' | 'readwrite' = 'readwrite') {
+export async function hasPermission(h: FileSystemHandle | FileHandle, mode: 'read' | 'readwrite' = 'readwrite') {
+  if (isLocalFile(h)) return true
   try {
     return (await h.queryPermission({ mode })) === 'granted'
   } catch {
@@ -32,7 +36,8 @@ export async function hasPermission(h: FileSystemHandle, mode: 'read' | 'readwri
 }
 
 /** 请求权限（需要在用户手势中调用） */
-export async function requestPermission(h: FileSystemHandle, mode: 'read' | 'readwrite' = 'readwrite') {
+export async function requestPermission(h: FileSystemHandle | FileHandle, mode: 'read' | 'readwrite' = 'readwrite') {
+  if (isLocalFile(h)) return true
   try {
     if ((await h.queryPermission({ mode })) === 'granted') return true
     return (await h.requestPermission({ mode })) === 'granted'
@@ -41,17 +46,23 @@ export async function requestPermission(h: FileSystemHandle, mode: 'read' | 'rea
   }
 }
 
-export async function readHandle(h: FileSystemFileHandle): Promise<{ text: string; modified: number }> {
+export async function readHandle(h: FileHandle): Promise<{ text: string; modified: number }> {
+  if (isLocalFile(h)) {
+    const disk = await localFileRequest(h)
+    return { text: normalizeNewlines(disk.text), modified: disk.modified }
+  }
   const f = await h.getFile()
   return { text: normalizeNewlines(await f.text()), modified: f.lastModified }
 }
 
-export async function statHandle(h: FileSystemFileHandle): Promise<number> {
+export async function statHandle(h: FileHandle): Promise<number> {
+  if (isLocalFile(h)) return (await localFileRequest(h)).modified
   const f = await h.getFile()
   return f.lastModified
 }
 
-export async function writeHandle(h: FileSystemFileHandle, text: string): Promise<number> {
+export async function writeHandle(h: FileHandle, text: string): Promise<number> {
+  if (isLocalFile(h)) return (await localFileRequest(h, text)).modified
   const w = await h.createWritable()
   await w.write(text)
   await w.close()

@@ -1,6 +1,9 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createRequire } from 'node:module'
+
+const { localFiles } = createRequire(import.meta.url)('./scripts/local-files.cjs')
 
 /**
  * 本地转发代理：/__proxy/<scheme>/<host>/<path> → <scheme>://<host>/<path>
@@ -65,7 +68,10 @@ function aiProxy(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), aiProxy()],
+  plugins: [react(), aiProxy(), {
+    name: 'writee-local-files',
+    configureServer(server) { server.middlewares.use(localFiles()) },
+  }],
   server: { port: 5173 },
   preview: { port: 4173 },
   build: { chunkSizeWarningLimit: 1200 },

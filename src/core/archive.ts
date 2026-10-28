@@ -1,5 +1,6 @@
 import { createStore, get, set, del } from 'idb-keyval'
-import type { DocArchive, DocIndexEntry, FileLocation, WorkspaceRoot } from './types'
+import type { DocArchive, DocIndexEntry, FileHandle, FileLocation, WorkspaceRoot } from './types'
+import { isLocalFile } from './localFile'
 import { uid } from './uid'
 
 const store = createStore('writee', 'archives')
@@ -26,7 +27,8 @@ export async function saveRoot(handle: FileSystemDirectoryHandle): Promise<Works
 }
 
 /** 重叠授权目录也可识别；保留存档原本采用的目录身份。 */
-export async function locateFile(handle: FileSystemFileHandle): Promise<FileLocation[]> {
+export async function locateFile(handle: FileHandle): Promise<FileLocation[]> {
+  if (isLocalFile(handle)) return []
   const locations: FileLocation[] = []
   for (const root of await loadRoots()) {
     try {
@@ -108,12 +110,16 @@ export async function deleteArchive(id: string) {
 }
 
 /** 用文件句柄找到对应的存档（同一个文件再次打开时恢复注释） */
-export async function findArchiveByHandle(h: FileSystemFileHandle): Promise<DocArchive | undefined> {
+export async function findArchiveByHandle(h: FileHandle): Promise<DocArchive | undefined> {
   const list = await loadIndex()
   for (const e of list) {
     if (!e.hasHandle) continue
     const a = await loadArchive(e.id)
     if (!a?.handle) continue
+    if (isLocalFile(h) || isLocalFile(a.handle)) {
+      if (isLocalFile(h) && isLocalFile(a.handle) && h.localKey === a.handle.localKey) return a
+      continue
+    }
     try {
       if (await a.handle.isSameEntry(h)) return a
     } catch {

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { ChangeSet } from '@codemirror/state'
-import type { Analysis, DocData, Note, NoteColor, Tag, Unit } from '../core/types'
+import type { Analysis, DocData, FileHandle, Note, NoteColor, Tag, Unit } from '../core/types'
 import { NOTE_COLORS } from '../core/types'
 import { diffChanges, mapData, mapperFromChanges, mergeRanges, recordEdits, type PosMapper } from '../core/mapping'
 import { buildSections, cardParent, siblingsOf, type Section, type SectionTree } from '../core/sections'
@@ -22,7 +22,7 @@ export type FileStatus = 'memory' | 'saved' | 'dirty' | 'saving' | 'error' | 'co
 export interface DocMeta {
   id: string
   name: string
-  handle: FileSystemFileHandle | null
+  handle: FileHandle | null
   created: number
 }
 

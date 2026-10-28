@@ -67,15 +67,23 @@ if ($NoBrowser) {
     exit 0
 }
 
+# 优先使用 Chrome，未安装时回退到 Edge。
 $browserPaths = @(
-    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
-    (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
     (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
-    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
+    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe'),
+    (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
+    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
+    (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')
 )
 $browserPath = $browserPaths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if ($browserPath) {
     Start-Process -FilePath $browserPath -ArgumentList ('--app=' + $appUrl)
+    # 显式读取 UTF-8 脚本，让系统 PowerShell 也能正确处理中文路径。
+    $iconScriptPath = (Join-Path $PSScriptRoot 'window-icons.ps1').Replace("'", "''")
+    $windowIconPath = (Join-Path $projectRoot 'public\favicon.ico').Replace("'", "''")
+    $iconCommand = "& ([ScriptBlock]::Create([IO.File]::ReadAllText('$iconScriptPath', [Text.Encoding]::UTF8))) -IconPath '$windowIconPath'"
+    $iconEncodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($iconCommand))
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $iconEncodedCommand) -WindowStyle Hidden
 } else {
     Start-Process $appUrl
 }

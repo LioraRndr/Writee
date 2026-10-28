@@ -90,11 +90,23 @@ export interface WorkspaceRoot {
   handle: FileSystemDirectoryHandle
 }
 
+/** Windows 启动器授权的本地路径引用，可直接存入 IndexedDB。 */
+export interface LocalFileHandle {
+  kind: 'file'
+  name: string
+  localKey: string
+  token: string
+  /** 本机服务返回的真实绝对路径；旧存档可在需要时重新读取。 */
+  path?: string
+}
+
+export type FileHandle = FileSystemFileHandle | LocalFileHandle
+
 /** IndexedDB 中每篇文档的存档 */
 export interface DocArchive {
   id: string
   name: string
-  handle?: FileSystemFileHandle
+  handle?: FileHandle
   location?: FileLocation
   data: DocData
   /** 上次与磁盘同步时的文本 */

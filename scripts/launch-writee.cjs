@@ -9,6 +9,7 @@ const url = 'http://localhost:5173/';
 const identity = 'ed94e1e9-0d44-467a-a738-445a929ca50d';
 const lockPath = path.join(os.tmpdir(), `writee-${identity}.lock`);
 const noBrowser = process.argv.includes('--no-browser');
+const fileArgument = process.argv.slice(2).find((arg) => arg !== '--no-browser');
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function ready() {
@@ -80,20 +81,39 @@ async function ensureServer() {
   }
 }
 
+// 静默维护 Windows 窗口图标，脚本显式按 UTF-8 读取，兼容系统 PowerShell。
+function startWindowIcons() {
+  if (process.platform !== 'win32') return;
+  const quote = (value) => "'" + value.replace(/'/g, "''") + "'";
+  const script = path.join(root, 'scripts', 'window-icons.ps1');
+  const icon = path.join(root, 'public', 'favicon.ico');
+  const command = `& ([ScriptBlock]::Create([IO.File]::ReadAllText(${quote(script)}, [Text.Encoding]::UTF8))) -IconPath ${quote(icon)}`;
+  const helper = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
+    detached: true, windowsHide: true, stdio: 'ignore',
+  });
+  helper.once('error', (error) => fs.appendFileSync(path.join(root, 'writee-icon-error.log'), `${new Date().toISOString()} ${error.message}\n`, 'utf8'));
+  helper.unref();
+}
+
 async function main() {
+  const file = fileArgument ? require('./local-files.cjs').registerFile(fileArgument) : null;
   await ensureServer();
-  if (noBrowser) { console.log(`Writee ready: ${url}`); return; }
+  const target = file ? `${url}#local-file=${file.key}&token=${file.token}` : url;
+  if (noBrowser) { console.log(`Writee ready: ${target}`); return; }
+  // 优先使用 Chrome，未安装时回退到 Edge。
   const browser = [
-    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
     path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
     path.join(process.env.LOCALAPPDATA || os.homedir(), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
   ].find((file) => fs.existsSync(file));
   const child = browser
-    ? spawn(browser, [`--app=${url}`], { detached: true, windowsHide: true, stdio: 'ignore' })
-    : spawn('explorer.exe', [url], { detached: true, windowsHide: true, stdio: 'ignore' });
+    ? spawn(browser, [`--app=${target}`], { detached: true, windowsHide: true, stdio: 'ignore' })
+    : spawn('explorer.exe', [target], { detached: true, windowsHide: true, stdio: 'ignore' });
   child.once('error', fail);
   child.unref();
+  if (browser) startWindowIcons();
 }
 
 function fail(error) {

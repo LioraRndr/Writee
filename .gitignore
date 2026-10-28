@@ -9,3 +9,6 @@ dist
 .env.*
 !.env.example
 *.partial
+
+# Windows 原生启动入口（注册时从 C# 源码生成）
+scripts/bin/

@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { useDoc } from './docStore'
 import { useUI } from './uiStore'
-import type { DocArchive, DocData, DocIndexEntry, FileLocation } from '../core/types'
+import type { DocArchive, DocData, DocIndexEntry, FileHandle, FileLocation } from '../core/types'
+import { isLocalFile, launchedFile, localFileAction, localSystemSupported } from '../core/localFile'
+import { linkKind } from '../core/links'
 import { deleteArchive, findArchiveByHandle, findArchiveByName, findArchiveByLocation, handleAtLocation, locateFile, locationRoot, loadArchive, loadIndex, saveArchive, saveRoot } from '../core/archive'
 import {
   downloadText,
@@ -46,7 +48,7 @@ export async function registerWorkspace(handle: FileSystemDirectoryHandle) {
   const root = await saveRoot(handle)
   for (const entry of await loadIndex()) {
     const a = await loadArchive(entry.id)
-    if (!a?.handle || a.location) continue
+    if (!a?.handle || a.location || isLocalFile(a.handle)) continue
     let path: string[] | null = null
     try { path = await handle.resolve(a.handle) } catch { /* 已失效的旧文件需手动关联 */ }
     if (!path?.length) continue
@@ -80,7 +82,7 @@ export async function relinkCurrent(handle: FileSystemFileHandle) {
   await openArchiveData(archive, id, handle.name, handle, disk.text, disk.modified, locations[0])
 }
 
-async function sessionHandle(current: NonNullable<typeof sess>, fallback: FileSystemFileHandle) {
+async function sessionHandle(current: NonNullable<typeof sess>, fallback: FileHandle) {
   const handle = current.location ? await handleAtLocation(current.location) : fallback
   const meta = useDoc.getState().meta
   if (sess === current && meta?.id === current.id && meta.handle !== handle) {
@@ -113,7 +115,7 @@ async function openArchiveData(
   a: DocArchive | undefined,
   id: string,
   name: string,
-  handle: FileSystemFileHandle | null,
+  handle: FileHandle | null,
   diskText: string,
   modified: number | undefined,
   location: FileLocation | undefined,
@@ -151,7 +153,7 @@ async function openArchiveData(
   await persistNow()
 }
 
-export async function openFromHandle(handle: FileSystemFileHandle) {
+export async function openFromHandle(handle: FileHandle) {
   useSession.setState({ loading: true })
   try {
     // 尽早请求写入权限（此时仍处在用户手势中）
@@ -278,6 +280,22 @@ export function downloadCurrent() {
   const doc = useDoc.getState()
   if (!doc.meta) return
   downloadText(doc.meta.name.endsWith('.md') ? doc.meta.name : doc.meta.name + '.md', doc.data.text)
+}
+
+export async function openDocumentLink(target: string) {
+  const kind = linkKind(target)
+  if (kind === 'unsafe') {
+    useUI.getState().toast('不支持此链接协议', { tone: 'error' })
+    return
+  }
+  try {
+    const handle = useDoc.getState().meta?.handle
+    if (handle && isLocalFile(handle) && localSystemSupported) await localFileAction(handle, 'open', target)
+    else if (kind === 'external') window.open(target, '_blank', 'noopener,noreferrer')
+    else throw new Error('本地链接需通过本机 Writee 启动器打开当前文档后使用')
+  } catch (error) {
+    useUI.getState().toast('打开失败：' + (error instanceof Error ? error.message : String(error)), { tone: 'error', ms: 6000 })
+  }
 }
 
 export async function grantWrite() {
@@ -409,7 +427,7 @@ export async function checkDisk() {
     const h = await sessionHandle(current, fallback)
     if (!(await hasPermission(h, 'read'))) return
     const m = await statHandle(h)
-    if (!current.location && m === current.diskModified) return
+    if (!current.location && !isLocalFile(h) && m === current.diskModified) return
     const disk = await readHandle(h)
     if (sess !== current || writing || useDoc.getState().fileStatus === 'conflict') return
     if (disk.text === current.diskText) {
@@ -459,6 +477,9 @@ export function startSession() {
   if (started) return
   started = true
   void refreshRecent()
+  void launchedFile().then((handle) => {
+    if (handle) return openFromHandle(handle)
+  }).catch((e) => useUI.getState().toast('打开失败：' + e.message, { tone: 'error', ms: 8000 }))
   useDoc.subscribe((s, p) => {
     if (!s.meta) return
     if (s.data !== p.data) scheduleArchive()

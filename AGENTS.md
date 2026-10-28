@@ -174,10 +174,11 @@ useDoc.applyChanges / applyTransform / replaceText
 11. **存储**：注释、分析、修改痕迹、卡片折叠只存在 IndexedDB（`writee` 库），永不写入 md 文件；设置与 AI 配置在 localStorage（`writee.settings`、`writee.ai`、`writee.copyopts`），打开的标签页列表在 `writee.tabs`。
 12. **动效**：统一用 `components/motion.ts`（FLIP、animateOut、smoothScroll），都要尊重 `prefers-reduced-motion`。CSS 进场动画用 `animation-fill-mode: backwards`，避免动画结束后残留 transform 覆盖其他样式。`CardEditor` 必须在 layout effect 中挂载，父级 FLIP 只能读取真实编辑器高度；E2E 要求动画终点与最终自然高度误差不超过 2px，不能把空容器高度当成终点。折叠标题与展开标题必须共享字号、行高、padding、`font-feature-settings` 与东亚字体变体。折叠/展开由 `cards/fold.ts` 处理：在 `collapsed` 变化的同步监听里（React 重渲染前）把即将移除的内容（展开前的摘要按钮 / 收起前的编辑器与子卡片）克隆成 `.card-fold-ghost`，去掉全部 `data-*`、焦点与光标层，标题在克隆里隐藏；新内容的淡入由卡片上的 `data-fold` 属性驱动的 CSS（编辑器首行即标题不参与）。**标题在任何一侧都不能模糊或淡入**。`playFlip` 在折叠时按最大高度变化量统一时长（240–460ms）与曲线 `FOLD_EASE`，且必须逐个读取元素位置（前面已开始的高度动画会推动后面的元素，批量读取会导致位移翻倍）。减少动态效果时不创建幽灵层。
 13. **调试钩子**：开发模式下 `window.__writee = { useDoc, useUI, registry, session, buildNotesPrompt, importAnalysis, buildManualPrompt }`，e2e 依赖它，改名需同步修改 `e2e/`。
-14. **表格写回**：`core/table.ts` 统一解析与序列化；Widget 产生差异后必须加表格起点 `from`，并交给当前视图构造 ChangeSet，不能把表格局部长度的 ChangeSet 直接 dispatch 给整篇文档。`TableController` 挂在部件 DOM 上，`updateDOM` 原地更新（同一张表：起点或源码之一相同），提交后的焦点由 `focusRequests` 交接；重建表格时旧编辑框被移除会触发 focusout，必须用 `rendering` 标记忽略；失焦提交带 `focus: false`，不能把焦点抢回表格。编辑框覆盖在单元格上、隐藏的 `.cm-table-sizer` 撑开尺寸，保证进入编辑时列宽不变；每列按内容设置最小宽度（封顶 10em）。部件自己处理的按键要 `stopPropagation`，全局 ⌘Z 也会跳过 `defaultPrevented` 的事件，避免撤销两次。撤销/重做把光标送回变化处时，若落在渲染表格内则改为选中单元格（`renderedTableAt` + `focusTableAt`），上下方向键从正文进入表格同理，表格只在主动“编辑源码”或在源码里输入时才显示 Markdown。
+14. **表格写回**：`core/table.ts` 统一解析与序列化；Widget 产生差异后必须加表格起点 `from`，并交给当前视图构造 ChangeSet，不能把表格局部长度的 ChangeSet 直接 dispatch 给整篇文档。`TableController` 挂在部件 DOM 上，`updateDOM` 原地更新（同一张表：起点或源码之一相同），提交后的焦点由 `focusRequests` 交接；重建表格时旧编辑框被移除会触发 focusout，必须用 `rendering` 标记忽略；失焦提交带 `focus: false`，不能把焦点抢回表格。编辑框覆盖在单元格上、隐藏的 `.cm-table-sizer` 撑开尺寸，进入编辑前记下格宽作为编辑格的 `min-width`，保证列宽不变。表格宽度 `fit-content` + `max-width: 100%`、`table { width: auto }`：按内容收缩，长单元格格内换行，短单元格（≤6em、单行）加 `.is-short` 不折行；不要再给列设固定最小宽度（会抬高表格最小宽度，列多时把整个编辑器撑宽）。`.cm-content` 必须保持 `min-width: 0`：它是 flex 子项，默认最小宽度等于最宽内容，宽表格 / 长公式会让正文跟着跳出卡片与版心。部件自己处理的按键要 `stopPropagation`，全局 ⌘Z 也会跳过 `defaultPrevented` 的事件，避免撤销两次。撤销/重做把光标送回变化处时，若落在渲染表格内则改为选中单元格（`renderedTableAt` + `focusTableAt`），上下方向键从正文进入表格同理，表格只在主动“编辑源码”或在源码里输入时才显示 Markdown。
 15. **本机系统动作**：`open/reveal` 复用现有限权令牌与 localhost POST 通道，不开放任意网页调用；相对路径以当前 Markdown 目录解析，OS 调用禁止 shell 拼接。网页版没有真实绝对路径时不伪造。
 16. **多标签页**：打开、切换、关闭都经过 `session.ts` 的 `serial()` 队列；内部互相调用用 `*Impl` 版本，避免排队等自己。新文档一律走 `present(id, install)`：已在前台只检查磁盘，在后台则切回，否则停放当前文档后载入并插到当前标签页之后。后台标签页不轮询磁盘，切回时检查。恢复快照期间 `quiet` 为真，跳过自动写回/存档调度。工作目录迁移会同步更新后台快照的 `sess.location`。Workspace 按 `meta.id` 重新挂载，滚动位置用 `pendingScrollFor(id)` 读取、应用后再清除（开发模式 StrictMode 会挂载两次）。
 17. **全角标点**：正文不得启用 `font-variant-east-asian: proportional-width`（pwid），并显式写 `'pwid' 0`。本机装有思源宋体时 pwid 会把 `，`、`（`、`“` 收窄成与半角相同的宽度，全角/半角逗号无法区分。
+18. **窄屏布局**：≤900px 时左侧栏（大纲 / 标签页）仍在文档流中挤压正文，宽度为 `--outline-eff = min(--outline-w, 46vw)`（左侧栏内部元素都用这个变量）；右侧注释栏覆盖显示，两侧互斥。进入窄屏（含首次以窄屏打开）时收起两侧栏，状态记在 Workspace 模块变量 `lastNarrow`，切换标签页重新挂载不再收起。
 
 ## 6. 测试
 
@@ -188,14 +189,16 @@ useDoc.applyChanges / applyTransform / replaceText
   - `file-sync` 用 OPFS 模拟本地文件：自动写回、外部修改载入且注释对齐、存档恢复
   - `workspace` 工作目录身份、文件替换、同名隔离与旧笔记恢复
   - `ai-mock` 拦截请求模拟官方 Anthropic / 第三方 Anthropic 兼容 / OpenAI 兼容，校验请求格式与流式解析
-  - `layout` 侧栏拖拽、结构标注、主题光标、320/480/720/900px 顶栏与侧栏互斥
+  - `layout` 侧栏拖拽、结构标注、主题光标、320/480/720/900px 顶栏不重叠、左侧栏挤压正文且宽度封顶、右栏覆盖且两侧互斥、切换标签页不收起大纲
   - `local-file` 真实本机文件读写、编码/冲突/存档、文件菜单与链接动作（动作请求拦截）
-  - `editing` 两种模式的公式、表格编辑/撤销/注释定位/粘贴/拖放/真实剪贴板；表格进入编辑列宽不变、点击落点、Enter/Tab 流程、失焦不抢焦点、右键与行列菜单、拖选、添加行、方向键进出表格与撤销后保持渲染；全角标点不启用 pwid
+  - `editing` 两种模式的公式、表格编辑/撤销/注释定位/粘贴/拖放/真实剪贴板；表格进入编辑列宽不变、点击落点、Enter/Tab 流程、失焦不抢焦点、右键与行列菜单、拖选、添加行、方向键进出表格与撤销后保持渲染；全角标点不启用 pwid；宽表格 / 长公式不撑宽编辑器（两种模式下正文不出卡片和版心、列多的表格表内滚动、窄表按内容收缩、短单元格不折行）
   - `tabs` 多标签页：新开/切换保留正文、撤销历史、模式与滚动位置，文件型标签页切走前写回、切回载入外部修改、关闭前写回，Alt+数字、拖动排序、右键关闭其他、“+”回文档列表、左侧栏与大纲切换、刷新后恢复列表
 - 系统文件选择框、真实 API Key、输入法（IME）、Safari/Firefox、实际外部程序打开无法自动化，需人工验证。
 - 云端容器里的 headless Chromium（Playwright 1243 版）对“从 IndexedDB 取回的 OPFS 句柄”调用任何方法（`isSameEntry`、`resolve`、`queryPermission`……）都会让页面崩溃，因此 `file-sync`、`workspace` 两组在该环境必然失败（改动前同样如此）；需在本机 Chrome 上跑。`tabs` 里的文件型标签页只打开一个 OPFS 文件、不触发取回句柄，可以在两处都运行。
 
 ## 7. 当前进度（更新于 2026-10-28）
+
+**宽表格不再撑出边界、表格宽度自适应、窄屏左侧栏挤压正文（2026-10-28 第二次）**：用户反馈表格超出卡片时正文也跟着出界、编辑模式下宽度自适应不好、左侧栏不该覆盖正文。根因：上一轮重写表格样式时去掉了原有的 `container-type`，又给每列设了最小宽度，表格的最小宽度经 CodeMirror 的 flex 内容区向上传递，整个编辑器被撑宽（实测编辑模式 895px 对版心 592px，卡片里 869px 对卡片 542px）。修复：`.cm-content { min-width: 0 }` 统一兜住所有宽部件；表格改为按内容收缩（窄表不铺满）、最宽到可用宽度，长格换行、短格不折行，列实在太多时表内横向滚动；进入编辑时保持原格宽。≤900px 时左侧栏改为留在文档流里挤压正文（最多 46% 视口宽），右栏仍覆盖且两侧互斥；进入窄屏只在状态变化时收起侧栏，切换标签页不再把大纲收起。窄卡片头部的“N 张子卡片”不再逐字竖排。验证：类型检查、19 项单元测试、生产构建通过；新增宽内容 E2E（两种模式，先在旧代码上确认会失败），布局 E2E 改为断言挤压、宽度封顶与切换标签页不收起；云端 9 组中 7 组通过（`file-sync`、`workspace` 仍是容器环境问题）。截图检查了宽表、12 列表、嵌套卡片、480/760px 两种模式。推送到 `claude/adoring-thompson-ml3vu0`（上一轮 PR 已合并，本分支从最新 `main` 重新开始），未部署线上。
 
 **多标签页、表格交互、卡片折叠动效与全角标点（2026-10-28，云端会话）**：新增多标签页：每篇文档一个标签页，切换时先写回文件与存档再停放内存快照，切回原样恢复正文、撤销历史、模式、折叠与滚动位置并立即检查外部修改；关闭当前标签页切到相邻页，`+` 回到文档列表；支持中键/×关闭、拖动排序、右键“关闭其他/右侧”、Alt+1…9；标签栏默认在顶部，可移到左侧栏与大纲用开关切换（设置里也可改），刷新后恢复列表、点选再载入。表格部件重写为挂在 DOM 上的控制器并用 `updateDOM` 原地更新：进入编辑列宽不变、点击处落光标、Enter 编辑下一行、Tab 到末格新增行、方向键跨格、拖选范围、右键与行列把手菜单、悬停添加行列、浮动工具条、失焦提交不抢焦点、方向键进出表格、撤销后保持渲染；修复两处“撤销两次”（部件按键冒泡到全局、编辑器处理后焦点移入表格）。卡片折叠/展开改为克隆旧内容原位淡出、新内容模糊淡入，收起时不再先变成空框，标题两侧都不参与动画；高度与下方卡片同一曲线、按变化量定时长，并修复逐帧读取位置的位移翻倍问题。全角标点：去掉正文 `proportional-width`（本机思源宋体下 `，` 被收窄到 7px，与 `,` 无法区分），实测恢复为 18.5px。验证：类型检查、19 项单元测试、生产构建通过；新增 `tabs` E2E，`cards`、`editing` 扩充，9 组中 7 组在云端容器通过，`file-sync`、`workspace` 因容器 Chromium 对 IndexedDB 取回的 OPFS 句柄崩溃而无法运行（改动前同样失败，需在本机 Chrome 复跑）。逐帧截图检查了两种方向的折叠、表格各状态、标签栏顶部/左侧、360/720px 与墨夜主题。本次提交并推送到分支 `claude/adoring-thompson-ml3vu0`，未部署线上。
 

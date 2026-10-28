@@ -158,8 +158,12 @@ span.level-chip {
   letter-spacing: 0.15em;
 }
 .card-count {
+  min-width: 0;
   margin-left: 4px;
   font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card-actions {
   display: flex;

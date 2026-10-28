@@ -317,6 +317,9 @@ function TagPopover() {
   )
 }
 
+/** 上一次的窄屏状态（跨 Workspace 重新挂载保留） */
+let lastNarrow: boolean | null = null
+
 /** 标签页放在左侧时，左侧栏顶部切换“大纲 / 标签页” */
 function LeftSwitch() {
   const panel = useUI((s) => s.settings.leftPanel)
@@ -347,7 +350,9 @@ export function Workspace() {
   const leftTabs = settings.tabsPosition === 'left' && settings.leftPanel === 'tabs'
 
   useEffect(() => {
-    if (overlay) useUI.getState().setSettings({ outlineOpen: false, railOpen: false })
+    // 进入窄屏（或首次以窄屏打开）时先收起两侧栏展示正文；切换标签页重新挂载时不再收起
+    if (overlay && lastNarrow !== true) useUI.getState().setSettings({ outlineOpen: false, railOpen: false })
+    lastNarrow = overlay
   }, [overlay])
   useEffect(() => {
     if (overlay && settings.outlineOpen && settings.railOpen) useUI.getState().setSettings({ outlineOpen: false })

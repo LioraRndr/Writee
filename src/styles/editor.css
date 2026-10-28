@@ -15,6 +15,11 @@
 }
 .cm-content {
   padding: 0 !important;
+  /*
+   * CodeMirror 的内容区是 flex 子项，默认最小宽度等于最宽内容的最小宽度：
+   * 宽表格、长公式会把整个编辑器撑宽，正文跟着跳出卡片 / 版心。宽内容各自横向滚动。
+   */
+  min-width: 0;
   /* 覆盖 CodeMirror 默认的黑色原生光标，主编辑器和卡片均跟随主题 */
   caret-color: var(--accent) !important;
   /*
@@ -333,6 +338,8 @@
 
 .cm-md-table {
   position: relative;
+  /* 宽度随内容自适应：窄表不铺满，宽表封顶到版心，放不下时在表格内横向滚动 */
+  width: fit-content;
   max-width: 100%;
   margin: 0.55em 0 1.15em;
   cursor: text;
@@ -345,10 +352,10 @@
   border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
 }
 
-/* 浮动工具条：只在表格获得焦点时浮在表格右上方，不占正文行高 */
+/* 浮动工具条：只在表格获得焦点时浮在表格左上方，不占正文行高 */
 .cm-table-toolbar {
   position: absolute;
-  right: 6px;
+  left: 0;
   bottom: calc(100% + 6px);
   z-index: 6;
   display: flex;
@@ -400,7 +407,7 @@
 .cm-md-table table {
   border-collapse: separate;
   border-spacing: 0;
-  width: 100%;
+  width: auto;
   font-size: 0.9em;
   line-height: 1.7;
 }
@@ -428,7 +435,7 @@
 }
 .cm-table-cell {
   position: relative;
-  min-width: 4.5em;
+  min-width: 3.5em;
   padding: 0.45em 0.8em;
   outline: none;
   color: var(--ink);
@@ -454,6 +461,9 @@ div.cm-table-cell:focus-visible {
   display: block;
   min-height: 1.7em;
   overflow-wrap: anywhere;
+}
+.cm-table-cell.is-short > .cm-table-value {
+  white-space: nowrap;
 }
 .cm-table-value a {
   color: var(--accent);

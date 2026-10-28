@@ -194,7 +194,8 @@ async function tableInteractions(page, mode) {
   await page.locator('.cm-table-menu-item', { hasText: '居中' }).click()
   assert((await docText(page)).includes('| :--- | :---: |'), `${mode}：列菜单设置居中`)
 
-  // 拖选范围
+  // 拖选范围（鼠标 API 不会自动滚动，先把表格滚到视口中间）
+  await cell(page, 1, 0).evaluate((el) => el.scrollIntoView({ block: 'center' }))
   const p1 = await cell(page, 1, 0).boundingBox()
   const p2 = await cell(page, 2, 1).boundingBox()
   await page.mouse.move(p1.x + 8, p1.y + 8)
@@ -221,6 +222,44 @@ async function tableInteractions(page, mode) {
   assertEq((await active()).cell, `${rows0 + 1}:0`, `${mode}：↑ 选中表格末行`)
 }
 
+// 宽表格与长公式不能把编辑器撑宽：正文留在卡片 / 版心以内，表格按内容收缩、放不下时在表格内滚动
+async function wideContent(page, mode) {
+  await page.getByRole('button', { name: mode, exact: true }).click()
+  const cols = 12
+  const row = (f) => '| ' + Array.from({ length: cols }, (_, i) => f(i)).join(' | ') + ' |'
+  const doc = `# 宽内容\n\n## 卡\n\n### 子卡\n\n表格前的正文写得长一些，确认它始终在卡片或版心之内换行，不会被下面的宽表格撑出边界。\n\n${row((i) => '列名' + i)}\n${row(() => '---')}\n${row((i) => '数据' + i)}\n\n| 项目 | 第一种做法的详细说明 | 备注 |\n| --- | --- | --- |\n| 生成 | 直接让模型一次性写出完整稿件，再由作者逐段核对并补充自己的经历与判断 | 需要人工取舍 |\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n$$\n\\sum_{i=1}^{n} a_i + b_i + c_i + d_i + e_i + f_i + g_i + h_i + i_i + j_i + k_i + l_i + m_i + n_i + o_i + p_i + q_i + r_i + s_i\n$$\n\n表格后的正文也一样。\n`
+  await replaceDoc(page, doc)
+  await page.waitForSelector('.cm-md-table [data-cell="1:0"]', { timeout: 1800 })
+  await page.waitForTimeout(300)
+  const r = await page.evaluate(() => {
+    const w = (el) => el.getBoundingClientRect().width
+    const content = [...document.querySelectorAll('.cm-content')].filter((c) => c.querySelector('.cm-md-table')).pop()
+    const box = content.closest('.card') ?? document.querySelector('.text-col')
+    const boxRect = box.getBoundingClientRect()
+    const tables = [...content.querySelectorAll('.cm-md-table')]
+    const lines = [...content.querySelectorAll('.cm-line')].filter((l) => l.textContent.includes('正文'))
+    const scroll = tables[0].querySelector('.cm-table-scroll')
+    return {
+      content: w(content),
+      parent: w(content.closest('.cm-editor').parentElement),
+      lineRight: Math.max(...lines.map((l) => l.getBoundingClientRect().right)),
+      boxRight: boxRect.right,
+      tables: tables.map(w),
+      wideScrolls: scroll.scrollWidth > scroll.clientWidth + 1,
+      pageOverflow: document.querySelector('.scroller').scrollWidth > document.querySelector('.scroller').clientWidth + 1,
+    }
+  })
+  assert(r.content <= r.parent + 1, `${mode}：编辑器内容区不被宽表格撑宽：${JSON.stringify(r)}`)
+  assert(r.lineRight <= r.boxRight + 1, `${mode}：正文不超出${mode === '卡片' ? '卡片' : '版心'}：${JSON.stringify(r)}`)
+  assert(r.tables.every((t) => t <= r.content + 1), `${mode}：表格不超过内容宽度：${JSON.stringify(r)}`)
+  assert(r.wideScrolls, `${mode}：列太多的表格在表格内横向滚动`)
+  assert(r.tables[1] <= r.content + 1 && r.tables[1] > r.content * 0.6, `${mode}：长单元格在格内换行，表格占满可用宽度：${JSON.stringify(r)}`)
+  assert(r.tables[2] < r.content * 0.5, `${mode}：窄表格按内容收缩，不铺满整行：${JSON.stringify(r)}`)
+  assert(!r.pageOverflow, `${mode}：页面不横向溢出`)
+  const shortCell = await page.locator('.cm-md-table').nth(1).locator('[data-cell="1:0"] .cm-table-value').evaluate((el) => el.getClientRects().length)
+  assertEq(shortCell, 1, `${mode}：短单元格不被长单元格挤成多行`)
+}
+
 export default async function ({ page }) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await openSample(page)
@@ -245,6 +284,8 @@ export default async function ({ page }) {
   await tableScenario(page, '卡片')
   await tableInteractions(page, '编辑')
   await tableInteractions(page, '卡片')
+  await wideContent(page, '编辑')
+  await wideContent(page, '卡片')
 
   // 全角与半角标点必须可区分：正文不启用 pwid（本机装有思源宋体时会把“，”收窄成半角宽度）
   const east = await page.locator('.cm-content').first().evaluate((el) => [getComputedStyle(el).fontVariantEastAsian, getComputedStyle(el).fontFeatureSettings])

@@ -28,6 +28,8 @@ export function measure(container: HTMLElement | null, attr: string, heightIds?:
  * 播放 FLIP：元素从旧位置平滑移动到新位置；新出现的元素淡入。
  * 嵌套元素只补偿相对父元素的位移，避免重复叠加。
  */
+const heightAnimations = new WeakMap<HTMLElement, { animation: Animation; overflow: string }>()
+
 export function playFlip(container: HTMLElement | null, attr: string, snap: Snapshot | null, opts: { enter?: boolean } = {}) {
   if (!container || !snap) return
   const cr = container.getBoundingClientRect()
@@ -39,7 +41,7 @@ export function playFlip(container: HTMLElement | null, attr: string, snap: Snap
     const r = el.getBoundingClientRect()
     if (!old) {
       if (opts.enter)
-        el.animate([{ opacity: 0, transform: 'translateY(-6px) scale(0.985)' }, { opacity: 1, transform: 'none' }], {
+        el.animate([{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], {
           duration: 280,
           easing: EASE,
         })
@@ -60,12 +62,22 @@ export function playFlip(container: HTMLElement | null, attr: string, snap: Snap
       el.animate([{ transform: `translate(${dx}px, ${rel}px)` }, { transform: 'none' }], { duration: 300, easing: EASE })
     }
     if (snap.heightIds?.has(id) && Math.abs(old.height - r.height) > 2) {
+      const running = heightAnimations.get(el)
+      if (running) {
+        running.animation.cancel()
+        el.style.overflow = running.overflow
+        heightAnimations.delete(el)
+      }
       const prev = el.style.overflow
       el.style.overflow = 'clip'
-      el.animate([{ height: old.height + 'px' }, { height: r.height + 'px' }], { duration: 300, easing: EASE }).finished.then(
-        () => (el.style.overflow = prev),
-        () => (el.style.overflow = prev),
-      )
+      const animation = el.animate([{ height: old.height + 'px' }, { height: r.height + 'px' }], { duration: 300, easing: EASE })
+      heightAnimations.set(el, { animation, overflow: prev })
+      const restore = () => {
+        if (heightAnimations.get(el)?.animation !== animation) return
+        el.style.overflow = prev
+        heightAnimations.delete(el)
+      }
+      animation.finished.then(restore, restore)
     }
   }
 }

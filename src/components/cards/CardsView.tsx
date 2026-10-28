@@ -1,5 +1,5 @@
 import { ALT, SHIFT } from '../../core/platform'
-import { useEffect, useLayoutEffect, useReducer, useRef } from 'react'
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
 import { useDoc } from '../../store/docStore'
 import { useUI } from '../../store/uiStore'
 import { cardDepth, structureKey, type Section } from '../../core/sections'
@@ -7,7 +7,7 @@ import { registry } from '../../editor/registry'
 import { CardEditor } from './CardEditor'
 import { cardFocus } from './focus'
 import { startTreeDrag } from './dnd'
-import { animateOut, flash, measure, playFlip, type Snapshot } from '../motion'
+import { animateOut, flash, measure, playFlip, reducedMotion, type Snapshot } from '../motion'
 import { Menu } from '../Menu'
 import {
   IconChevron,
@@ -59,13 +59,21 @@ export function CardsView() {
         force()
       }
     })
-    // 折叠/展开：同时对被切换的卡片做高度动画
+    // 折叠/展开：目标与祖先共享高度动画，避免嵌套边框先跳到终值
     const offUI = useUI.subscribe((s, p) => {
       if (s.collapsed === p.collapsed) return
       const a = new Set(s.collapsed)
       const b = new Set(p.collapsed)
       const toggled = new Set([...a].filter((x) => !b.has(x)).concat([...b].filter((x) => !a.has(x))))
-      snap.current = measure(root.current, 'data-card', toggled)
+      const heightIds = new Set(toggled)
+      for (const id of toggled) {
+        let el = root.current?.querySelector(`[data-card="${id}"]`)?.parentElement
+        while (el && el !== root.current) {
+          if (el.hasAttribute('data-card')) heightIds.add(el.getAttribute('data-card')!)
+          el = el.parentElement
+        }
+      }
+      snap.current = measure(root.current, 'data-card', heightIds)
     })
     return () => {
       unsub()
@@ -155,7 +163,10 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
   const collapsed = useUI((st) => st.collapsed.includes(s.id))
   const el = useRef<HTMLElement>(null)
   const id = s.id
+  const [leavingPreview, setLeavingPreview] = useState<string | null>(null)
+  const revealTimer = useRef(0)
 
+  useEffect(() => () => window.clearTimeout(revealTimer.current), [])
   useEffect(() => {
     if (!collapsed || !el.current) return
     const entry = {
@@ -169,7 +180,16 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
   }, [collapsed, id])
 
   const doc = () => useDoc.getState()
-  const toggle = () => useUI.getState().toggleCollapsed(id)
+  const preview = collapsed ? collapsedPreview(s) : null
+  const toggle = () => {
+    window.clearTimeout(revealTimer.current)
+    if (collapsed) {
+      const next = preview && !reducedMotion() ? preview : null
+      setLeavingPreview(next)
+      if (next) revealTimer.current = window.setTimeout(() => setLeavingPreview(null), 320)
+    } else setLeavingPreview(null)
+    useUI.getState().toggleCollapsed(id)
+  }
 
   const moveKeepingFocus = (dir: 'up' | 'down' | 'left' | 'right') => {
     const focused = registry.focused()
@@ -213,13 +233,12 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
     })
   }
 
-  const preview = collapsed ? collapsedPreview(s) : null
   const childCount = countDescendants(s)
 
   return (
     <section
       ref={el}
-      className={'card d' + Math.min(depth, 4) + (collapsed ? ' is-collapsed' : '')}
+      className={'card d' + Math.min(depth, 4) + (collapsed ? ' is-collapsed' : '') + (leavingPreview ? ' is-revealing' : '')}
       data-drag-item={id}
       data-depth={depth}
       data-card={id}
@@ -236,7 +255,12 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
         >
           <IconGrip size={14} />
         </button>
-        <button className={'card-fold' + (collapsed ? '' : ' is-open')} onClick={toggle} title={collapsed ? '展开' : '折叠'}>
+        <button
+          className={'card-fold' + (collapsed ? '' : ' is-open')}
+          onClick={toggle}
+          title={collapsed ? '展开' : '折叠'}
+          aria-expanded={!collapsed}
+        >
           <IconChevron size={13} />
         </button>
         <Menu
@@ -316,6 +340,12 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
             </div>
           )}
         </>
+      )}
+      {leavingPreview && (
+        <div className="card-collapsed-ghost" aria-hidden={true}>
+          <span className={'card-collapsed-title h' + s.level}>{s.heading?.text || '（无标题）'}</span>
+          <span className="card-collapsed-preview">{leavingPreview}</span>
+        </div>
       )}
       <button
         className="card-add-below"

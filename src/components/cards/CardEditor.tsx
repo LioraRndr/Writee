@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { createEditor, type EditorHandle } from '../../editor/setup'
 import { useDoc } from '../../store/docStore'
 import { useUI } from '../../store/uiStore'
@@ -17,7 +17,7 @@ export function CardEditor({ sectionId, placeholder }: { sectionId: string; plac
   const viewId = 'card:' + sectionId
   const last = useRef<[number, number]>([0, 0])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const range = (): [number, number] => {
       const s = findSection(sectionId)
       if (!s) return last.current

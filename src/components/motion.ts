@@ -1,6 +1,13 @@
 /** 动效工具：FLIP 重排动画、进出场、平滑滚动。系统开启“减少动态效果”时全部跳过。 */
 
 export const EASE = 'cubic-bezier(0.2, 0.7, 0.2, 1)'
+/** 折叠/展开的高度曲线：起步柔和、收尾长减速，大幅度变化时不显得突兀 */
+export const FOLD_EASE = 'cubic-bezier(0.2, 0, 0, 1)'
+
+/** 高度变化越大，动画越长（240–460ms） */
+export function foldDuration(delta: number) {
+  return Math.round(Math.min(460, 240 + Math.abs(delta) * 0.22))
+}
 
 export function reducedMotion() {
   return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -30,17 +37,34 @@ export function measure(container: HTMLElement | null, attr: string, heightIds?:
  */
 const heightAnimations = new WeakMap<HTMLElement, { animation: Animation; overflow: string }>()
 
-export function playFlip(container: HTMLElement | null, attr: string, snap: Snapshot | null, opts: { enter?: boolean } = {}) {
+export function playFlip(
+  container: HTMLElement | null,
+  attr: string,
+  snap: Snapshot | null,
+  opts: { enter?: boolean; skipEnter?: (el: HTMLElement) => boolean } = {},
+) {
   if (!container || !snap) return
   const cr = container.getBoundingClientRect()
   const els = [...container.querySelectorAll<HTMLElement>(`[${attr}]`)]
+  // 折叠/展开：所有元素共用一条按高度变化量计算的时间线，边框与下方卡片严格同步
+  let maxDh = 0
+  if (snap.heightIds?.size) {
+    for (const el of els) {
+      const id = el.getAttribute(attr)!
+      const old = snap.rects.get(id)
+      if (old && snap.heightIds.has(id)) maxDh = Math.max(maxDh, Math.abs(old.height - el.getBoundingClientRect().height))
+    }
+  }
+  const fold = maxDh > 2
+  const timing = { duration: fold ? foldDuration(maxDh) : 300, easing: fold ? FOLD_EASE : EASE }
   const delta = new Map<HTMLElement, number>()
   for (const el of els) {
     const id = el.getAttribute(attr)!
     const old = snap.rects.get(id)
+    // 逐个读取：前面已开始的高度动画会通过布局推动后面的元素，位移只需补偿剩余部分
     const r = el.getBoundingClientRect()
     if (!old) {
-      if (opts.enter)
+      if (opts.enter && !opts.skipEnter?.(el))
         el.animate([{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], {
           duration: 280,
           easing: EASE,
@@ -59,7 +83,7 @@ export function playFlip(container: HTMLElement | null, attr: string, snap: Snap
     delta.set(el, dy)
     const rel = dy - parentDy
     if (Math.abs(rel) > 1 || Math.abs(dx) > 1) {
-      el.animate([{ transform: `translate(${dx}px, ${rel}px)` }, { transform: 'none' }], { duration: 300, easing: EASE })
+      el.animate([{ transform: `translate(${dx}px, ${rel}px)` }, { transform: 'none' }], timing)
     }
     if (snap.heightIds?.has(id) && Math.abs(old.height - r.height) > 2) {
       const running = heightAnimations.get(el)
@@ -70,7 +94,7 @@ export function playFlip(container: HTMLElement | null, attr: string, snap: Snap
       }
       const prev = el.style.overflow
       el.style.overflow = 'clip'
-      const animation = el.animate([{ height: old.height + 'px' }, { height: r.height + 'px' }], { duration: 300, easing: EASE })
+      const animation = el.animate([{ height: old.height + 'px' }, { height: r.height + 'px' }], timing)
       heightAnimations.set(el, { animation, overflow: prev })
       const restore = () => {
         if (heightAnimations.get(el)?.animation !== animation) return

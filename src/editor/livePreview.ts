@@ -1,12 +1,12 @@
 import { syntaxTree } from '@codemirror/language'
-import { EditorState, Facet, StateEffect, StateField, type Range, type Extension } from '@codemirror/state'
-import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { EditorState, Facet, Prec, StateEffect, StateField, type Range, type Extension } from '@codemirror/state'
+import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { SyntaxNode } from '@lezer/common'
 import { findMathRanges, type MathRange, type TextRange } from '../core/math'
 import { findWikiLinks, linkKind, type WikiLink } from '../core/links'
 import { MathWidget } from './MathWidget'
 import { LinkWidget } from './LinkWidget'
-import { TableWidget } from './TableWidget'
+import { TableWidget, focusTableAt } from './TableWidget'
 
 /** 是否隐藏 Markdown 标记（实时预览）；关闭时为“源码模式”，仍保留排版样式 */
 export const hideMarks = Facet.define<boolean, boolean>({ combine: (v) => (v.length ? v[v.length - 1] : true) })
@@ -483,6 +483,40 @@ const tableField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
+/** pos 所在的已渲染表格（未渲染成部件时返回 null） */
+export function renderedTableAt(state: EditorState, pos: number) {
+  let hit: { from: number; to: number } | null = null
+  state.field(tableField, false)?.between(pos, pos, (from, to) => {
+    hit = { from, to }
+    return false
+  })
+  return hit as { from: number; to: number } | null
+}
+
+/** 上下方向键移入渲染表格时选中单元格，而不是把表格切回源码 */
+function enterTable(forward: boolean) {
+  return (view: EditorView) => {
+    const sel = view.state.selection.main
+    if (!sel.empty) return false
+    const line = view.state.doc.lineAt(sel.head)
+    const next = forward ? line.to + 1 : line.from - 1
+    if (next < 0 || next > view.state.doc.length) return false
+    // 只在光标处于紧邻表格的那一行的首 / 末视觉行时接管
+    const target = view.moveVertically(sel, forward)
+    if (view.state.doc.lineAt(target.head).number === line.number) return false
+    const table = renderedTableAt(view.state, next)
+    if (!table) return false
+    return focusTableAt(view, table.from, forward ? 'first' : 'last')
+  }
+}
+
+const tableKeys = Prec.high(
+  keymap.of([
+    { key: 'ArrowDown', run: enterTable(true) },
+    { key: 'ArrowUp', run: enterTable(false) },
+  ]),
+)
+
 function buildMathBlocks(state: EditorState): DecorationSet {
   if (!state.facet(hideMarks)) return Decoration.none
   const focused = state.field(focusedField)
@@ -529,6 +563,7 @@ export function livePreview(): Extension {
     inlinePlugin,
     focusedField,
     tableField,
+    tableKeys,
     mathBlockField,
     treeWatcher,
     focusEffect.of((_s, focusing) => setFocused.of(focusing)),

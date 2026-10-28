@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDoc } from './store/docStore'
 import { useUI } from './store/uiStore'
-import { openDialog, openFromFile, openFromHandle, saveAs, startSession, writeNow } from './store/session'
+import { activateTab, openDialog, openFromFile, openFromHandle, saveAs, startSession, useTabs, writeNow } from './store/session'
 import { useSel } from './editor/setup'
+import { isMac } from './core/platform'
 import { TopBar } from './components/TopBar'
 import { Welcome } from './components/Welcome'
 import { Workspace, addNoteForSelection } from './components/Workspace'
 import { StatusBar } from './components/StatusBar'
+import { TabStrip } from './components/TabStrip'
 import { Toasts } from './components/Toasts'
 import { CopyDialog } from './components/dialogs/CopyDialog'
 import { SettingsDialog } from './components/dialogs/SettingsDialog'
@@ -24,7 +26,10 @@ export default function App() {
   const meta = useDoc((s) => s.meta)
   const settings = useUI((s) => s.settings)
   const dialog = useUI((s) => s.dialog)
+  const hasTabs = useTabs((s) => s.tabs.length > 0)
   const [dragOver, setDragOver] = useState(false)
+  // 标签页默认在顶部；放到左侧栏时，回到文档列表（没有左侧栏）仍在顶部显示
+  const topTabs = hasTabs && (settings.tabsPosition === 'top' || !meta)
 
   useEffect(() => {
     startSession()
@@ -58,6 +63,17 @@ export default function App() {
       if (mod && k === 'o' && !e.shiftKey) {
         e.preventDefault()
         void openDialog()
+        return
+      }
+      // Alt+1…9：切换到第 N 个标签页（Alt+9 为最后一个）；macOS 文本框里 ⌥+数字用于输入符号，不拦截
+      if (e.altKey && !mod && !e.shiftKey && /^Digit[1-9]$/.test(e.code) && !(isMac && isEditable(document.activeElement))) {
+        const tabs = useTabs.getState().tabs
+        const n = Number(e.code.slice(5))
+        const tab = n === 9 ? tabs[tabs.length - 1] : tabs[n - 1]
+        if (tab) {
+          e.preventDefault()
+          void activateTab(tab.id)
+        }
         return
       }
       if (!useDoc.getState().meta) return
@@ -101,8 +117,8 @@ export default function App() {
         else if (ui.activeUnit) useUI.setState({ activeUnit: null })
         return
       }
-      // 不在文本框内时，⌘Z 也作用于文档
-      if (mod && k === 'z' && !isEditable(document.activeElement)) {
+      // 不在文本框内时，⌘Z 也作用于文档（编辑器已处理过的按键不再重复撤销：处理过程中焦点可能已移到表格单元格）
+      if (mod && k === 'z' && !e.defaultPrevented && !isEditable(document.activeElement)) {
         e.preventDefault()
         if (e.shiftKey) useDoc.getState().redo()
         else useDoc.getState().undo()
@@ -142,6 +158,7 @@ export default function App() {
       onDrop={onDrop}
     >
       <TopBar />
+      {topTabs && <TabStrip />}
       {meta ? (
         <>
           <Workspace key={meta.id} />

@@ -124,6 +124,103 @@ async function tableScenario(page, mode) {
   if (mode === '卡片') await shot(page, 'table-cards')
 }
 
+// 交互细节：编辑不改列宽、落点、失焦不抢焦点、Enter/Tab 流程、右键与行菜单、拖选、添加行、移出表格、原地更新
+async function tableInteractions(page, mode) {
+  await page.getByRole('button', { name: mode, exact: true }).click()
+  await replaceDoc(page, tableDoc + '\n\n表后段落。')
+  await page.waitForSelector('.cm-md-table [data-cell="1:0"]', { timeout: 1800 })
+  const widths = () => page.evaluate(() => [...document.querySelectorAll('.cm-md-table thead th[data-col]')].map((th) => Math.round(th.getBoundingClientRect().width)))
+  const active = () => page.evaluate(() => {
+    const a = document.activeElement
+    return { tag: a?.tagName, cell: a?.dataset?.cell ?? null, caret: a?.selectionStart ?? null, inTable: !!a?.closest('.cm-md-table'), cm: !!a?.classList.contains('cm-content') }
+  })
+  await page.evaluate(() => { window.__tableWrap = document.querySelector('.cm-md-table') })
+
+  const before = await widths()
+  const box = await cell(page, 1, 0).boundingBox()
+  await page.mouse.click(box.x + 0.8 * 16 + 18, box.y + box.height / 2)
+  assertEq(await widths(), before, `${mode}：进入编辑时列宽不变`)
+  const a1 = await active()
+  assertEq([a1.tag, a1.cell, a1.caret], ['TEXTAREA', '1:0', 1], `${mode}：光标落在点击位置`)
+  await page.keyboard.type('X')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(80)
+  assert((await docText(page)).includes('| 苹X果 | 1 |'), `${mode}：落点处插入并提交`)
+  const a2 = await active()
+  assertEq([a2.tag, a2.cell], ['TEXTAREA', '2:0'], `${mode}：Enter 继续编辑下一行同列`)
+  assert(await page.evaluate(() => window.__tableWrap === document.querySelector('.cm-md-table') && window.__tableWrap.isConnected), `${mode}：提交后表格原地更新，不整块重建`)
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(80)
+  assert((await docText(page)).includes('| 苹果 | 1 |'), `${mode}：未改动时 Ctrl+Z 撤销上一格提交`)
+  assert((await active()).inTable, `${mode}：撤销后焦点仍在表格内`)
+
+  // 点到表格外：提交但焦点留在正文
+  await page.mouse.click(box.x + 40, box.y + box.height / 2)
+  await page.keyboard.type('Y')
+  const para = page.locator('.cm-line', { hasText: '表后段落' }).first()
+  const pb = await para.boundingBox()
+  await page.mouse.click(pb.x + 30, pb.y + pb.height / 2)
+  await page.waitForTimeout(150)
+  assert((await docText(page)).includes('Y'), `${mode}：失焦时提交`)
+  const a3 = await active()
+  assert(!a3.inTable && a3.cm, `${mode}：失焦提交不把焦点抢回表格：${JSON.stringify(a3)}`)
+  await page.keyboard.press('Control+z')
+
+  // Tab 走到最后一格再按 Tab：新增一行
+  await page.waitForTimeout(80)
+  assertEq(await page.locator('.cm-md-table').count(), 1, `${mode}：正文中撤销表格修改后表格保持渲染`)
+  assert((await active()).inTable, `${mode}：撤销后选中变化所在的单元格：${JSON.stringify(await active())}`)
+  const rows0 = await page.locator('.cm-md-table tbody tr').count()
+  await clickAt(page, cell(page, 3, 1))
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(80)
+  assertEq(await page.locator('.cm-md-table tbody tr').count(), rows0 + 1, `${mode}：最后一格 Tab 新增一行`)
+  assertEq((await active()).cell, '4:0', `${mode}：新行第一格进入编辑`)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(80)
+  assertEq(await page.locator('.cm-md-table tbody tr').count(), rows0, `${mode}：撤销新增行`)
+
+  // 右键菜单与行菜单
+  await cell(page, 1, 1).click({ button: 'right' })
+  await page.locator('.cm-table-menu-item', { hasText: '在下方插入行' }).click()
+  assertEq(await page.locator('.cm-md-table tbody tr').count(), rows0 + 1, `${mode}：右键菜单插入行`)
+  await page.locator('.cm-md-table tbody tr[data-row="2"]').hover()
+  await page.locator('.cm-md-table [data-row-handle="2"]').click()
+  await page.locator('.cm-table-menu-item', { hasText: '删除行' }).click()
+  assertEq(await page.locator('.cm-md-table tbody tr').count(), rows0, `${mode}：行菜单删除行`)
+  await page.locator('.cm-md-table th[data-col="1"]').hover()
+  await page.locator('.cm-md-table [data-col-handle="1"]').click()
+  await page.locator('.cm-table-menu-item', { hasText: '居中' }).click()
+  assert((await docText(page)).includes('| :--- | :---: |'), `${mode}：列菜单设置居中`)
+
+  // 拖选范围
+  const p1 = await cell(page, 1, 0).boundingBox()
+  const p2 = await cell(page, 2, 1).boundingBox()
+  await page.mouse.move(p1.x + 8, p1.y + 8)
+  await page.mouse.down()
+  await page.mouse.move(p2.x + 12, p2.y + 10, { steps: 5 })
+  await page.mouse.up()
+  assertEq(await page.locator('.cm-md-table .cm-table-cell.is-selected').count(), 4, `${mode}：拖动选中 2×2 网格`)
+  assertEq((await active()).tag, 'DIV', `${mode}：拖选不进入编辑`)
+
+  // 悬停出现的添加行按钮
+  await page.locator('.cm-md-table').hover()
+  await page.locator('.cm-table-add-row').click()
+  assertEq(await page.locator('.cm-md-table tbody tr').count(), rows0 + 1, `${mode}：末尾添加行`)
+  assertEq((await active()).cell, `${rows0 + 1}:0`, `${mode}：新行直接编辑`)
+  await page.keyboard.press('Escape')
+
+  // 方向键移出表格回到正文，再按 ↑ 回到表格末行
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(80)
+  assert((await active()).cm, `${mode}：最后一行按 ↓ 回到正文`)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(80)
+  assertEq(await page.locator('.cm-md-table').count(), 1, `${mode}：↑ 进入表格时不切回源码`)
+  assertEq((await active()).cell, `${rows0 + 1}:0`, `${mode}：↑ 选中表格末行`)
+}
+
 export default async function ({ page }) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await openSample(page)
@@ -146,4 +243,11 @@ export default async function ({ page }) {
 
   await tableScenario(page, '编辑')
   await tableScenario(page, '卡片')
+  await tableInteractions(page, '编辑')
+  await tableInteractions(page, '卡片')
+
+  // 全角与半角标点必须可区分：正文不启用 pwid（本机装有思源宋体时会把“，”收窄成半角宽度）
+  const east = await page.locator('.cm-content').first().evaluate((el) => [getComputedStyle(el).fontVariantEastAsian, getComputedStyle(el).fontFeatureSettings])
+  assertEq(east[0], 'normal', '正文不使用 proportional-width')
+  assert(east[1].includes('"pwid" 0'), `正文显式关闭 pwid：${east[1]}`)
 }

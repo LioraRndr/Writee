@@ -193,8 +193,7 @@ span.level-chip {
   padding-top: 0.05em !important;
 }
 
-.card-collapsed,
-.card-collapsed-ghost {
+.card-collapsed {
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -203,11 +202,10 @@ span.level-chip {
   padding: 0 0 2px;
   text-align: left;
   font-size: calc(var(--fs) * 0.97);
-  font-variant-east-asian: proportional-width;
-  font-feature-settings: 'kern', 'liga', 'palt' 0;
+  font-variant-east-asian: normal;
+  font-feature-settings: 'kern', 'liga', 'palt' 0, 'pwid' 0;
 }
-.card .card .card-collapsed,
-.card .card .card-collapsed-ghost {
+.card .card .card-collapsed {
   font-size: calc(var(--fs) * 0.95);
 }
 .card-collapsed-title {
@@ -258,54 +256,26 @@ span.level-chip {
   overflow: hidden;
   max-width: 100%;
 }
-.card-collapsed {
-  animation: card-preview-enter 0.22s var(--ease) backwards;
-}
-.card-collapsed-ghost {
+/*
+ * 折叠/展开交叉过渡（见 cards/fold.ts）：旧内容克隆成幽灵层淡出，新内容带轻微模糊淡入。
+ * 标题不在任何一侧参与动画：编辑器首行（标题）与折叠标题原位衔接。
+ */
+.card-fold-ghost {
   position: absolute;
-  inset: 34px 24px auto;
-  width: auto;
-  z-index: 4;
+  z-index: 1;
   pointer-events: none;
-  background: inherit;
-  animation: card-preview-exit 0.24s var(--ease) forwards;
 }
-.card .card .card-collapsed-ghost {
-  inset: 32px 20px auto;
+.card[data-fold='opening'] > .card-editor .cm-content > :not(:first-child),
+.card[data-fold='opening'] > .card-children {
+  animation: card-fold-in 0.34s var(--ease) 0.05s backwards;
 }
-.card.is-revealing > .card-editor,
-.card.is-revealing > .card-children {
-  will-change: filter, opacity;
-  animation: card-content-reveal 0.3s var(--ease) backwards;
+.card[data-fold='closing'] > .card-collapsed .card-collapsed-preview {
+  animation: card-fold-in 0.26s var(--ease) 0.08s backwards;
 }
-@keyframes card-preview-enter {
+@keyframes card-fold-in {
   from {
-    opacity: 0;
-    filter: blur(3px);
-  }
-  to {
-    opacity: 1;
-    filter: blur(0);
-  }
-}
-@keyframes card-preview-exit {
-  from {
-    opacity: 1;
-    filter: blur(0);
-  }
-  to {
     opacity: 0;
     filter: blur(4px);
-  }
-}
-@keyframes card-content-reveal {
-  from {
-    opacity: 0;
-    filter: blur(5px);
-  }
-  to {
-    opacity: 1;
-    filter: blur(0);
   }
 }
 

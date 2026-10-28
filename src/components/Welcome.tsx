@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useSession, refreshRecent, openDialog, openRecent, openSample, newDocument, forgetArchive } from '../store/session'
+import { useSession, useTabs, refreshRecent, openDialog, openRecent, openSample, newDocument, forgetArchive } from '../store/session'
 import { fsaSupported } from '../core/fileAccess'
 import { useUI } from '../store/uiStore'
 import { Menu } from './Menu'
@@ -16,6 +16,7 @@ function fmtDate(t: number) {
 export function Welcome() {
   const recent = useSession((s) => s.recent)
   const loading = useSession((s) => s.loading)
+  const open = useTabs((s) => s.tabs)
   useEffect(() => {
     void refreshRecent()
   }, [])
@@ -59,6 +60,7 @@ export function Welcome() {
                   <span className="recent-name">{r.name}</span>
                   <span className="recent-excerpt">{r.excerpt}</span>
                   <span className="recent-meta">
+                    {open.some((t) => t.id === r.id) && <span className="recent-open">已打开</span>}
                     {r.notes > 0 && <span>{r.notes} 条注释</span>}
                     <span>{fmtDate(r.updated)}</span>
                   </span>

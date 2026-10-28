@@ -105,20 +105,21 @@ src/
   store/
     docStore.ts      文档状态（唯一事实来源）+ 全局撤销 + 卡片操作
     uiStore.ts       界面状态与设置（localStorage）、提示条
-    session.ts       打开/新建/另存/自动保存/外部修改轮询/冲突处理、链接打开
+    session.ts       多标签页（停放/切回/关闭/串行队列）、打开/新建/另存/自动保存/外部修改轮询/冲突处理、链接打开
   editor/
     setup.ts         createEditor（主编辑器与卡片编辑器共用）、视图 ↔ store 同步、覆盖层计算、useSel
     livePreview.ts   实时预览装饰（隐藏标记、公式、链接、表格、列表、引用、代码块等）
     MathWidget.ts    KaTeX 行内/块级公式部件
-    TableWidget.ts   渲染表格的单元格编辑、行列工具、拖放与剪贴板交互
+    TableWidget.ts   渲染表格：控制器挂在 DOM 上原地更新（updateDOM），单元格编辑、拖选、右键/行列菜单、拖放与剪贴板
     LinkWidget.ts    wiki 文件索引渲染与点击回源码
     overlays.ts      注释标签、结构单元、修改痕迹的装饰
     registry.ts      已挂载视图登记、位置 → 页面坐标（posBox）、布局重算调度
     inline.ts        表格单元格的行内 Markdown / 公式 / 链接渲染
   components/
-    Workspace.tsx    主布局、选区工具条、标签弹出框、委托事件
+    Workspace.tsx    主布局、左侧栏“大纲/标签页”切换、选区工具条、标签弹出框、委托事件
+    TabStrip.tsx     标签栏（顶部横排 / 左侧栏竖排）：切换、关闭、拖动排序、右键菜单
     MainEditor.tsx   编辑模式
-    cards/           卡片视图（CardsView、CardEditor、dnd 树形拖拽、focus 推迟重排）
+    cards/           卡片视图（CardsView、CardEditor、dnd 树形拖拽、focus 推迟重排、fold 折叠交叉过渡）
     rail/            注释栏（NotesRail）、结构栏（StructureRail）、对齐布局与连线（layout.ts）、TagPicker
     Outline.tsx      大纲（可拖拽排序）
     Resizer.tsx      侧栏宽度拖拽
@@ -156,6 +157,8 @@ useDoc.applyChanges / applyTransform / replaceText
         React 组件：大纲、注释栏、状态栏……
 ```
 
+多标签页：useDoc 始终只装“当前标签页”的文档。切换时 `session.park()` 先写回文件、写存档，再把 `meta / data / past / future / 文件状态 / 磁盘基线 sess / 冲突 / 模式与折叠 / 滚动位置` 停放到内存 `parked`；切回时 `unpark()` 用 `useDoc.restore()` 原样恢复（撤销历史不丢），随后立即 `checkDisk()`。标签页列表（id + 名称）存在 localStorage `writee.tabs`，刷新后只恢复列表，点选时再从存档载入。
+
 ## 5. 关键约定与不变量（改代码前务必理解）
 
 1. **全文是唯一事实来源**。所有位置数据都是全文字符偏移。任何文本变化必须走 `applyChanges` / `applyTransform`（自定义映射，如移动卡片）/ `replaceText`（diff 映射，如外部修改、整体替换）之一，不要直接改 `data.text`。
@@ -168,11 +171,13 @@ useDoc.applyChanges / applyTransform / replaceText
 8. **浮层定位**（注释栏、结构栏、连线、选区工具条）全部使用 page 元素坐标；优先用 DOM 中的徽标（`[data-tag-badge]`、`[data-unit-start]`），视图虚拟化导致不在 DOM 时用 `registry.posBox` 估算。需要重排时调用 `registry.requestLayout()`（RAF 合并）。
 9. **绝对定位的卡片**（注释、结构标签）用 `usePlacementClass`：未定位时 `visibility: hidden`。**隐藏元素无法获得焦点**，需要聚焦的逻辑要等定位之后（NoteCard 的 autoFocus 已处理）。
 10. **AI 接口**：`ai.ts` 只有当 Base URL 是 `api.anthropic.com` 时才附加官方专属参数（自适应思考 + effort、`fallbacks: "default"` + beta 头、system 的 cache_control），并且只有带 beta 时才走 `client.beta.messages`；第三方只发送 `model / max_tokens / system / messages / stream` 加用户的“额外参数”。默认模型 `claude-opus-5-5`。
-11. **存储**：注释、分析、修改痕迹、卡片折叠只存在 IndexedDB（`writee` 库），永不写入 md 文件；设置与 AI 配置在 localStorage（`writee.settings`、`writee.ai`、`writee.copyopts`）。
-12. **动效**：统一用 `components/motion.ts`（FLIP、animateOut、smoothScroll），都要尊重 `prefers-reduced-motion`。CSS 进场动画用 `animation-fill-mode: backwards`，避免动画结束后残留 transform 覆盖其他样式。`CardEditor` 必须在 layout effect 中挂载，父级 FLIP 只能读取真实编辑器高度；E2E 要求动画终点与最终自然高度误差不超过 2px，不能把空容器高度当成终点。折叠标题与展开标题必须共享字号、行高、padding、`font-feature-settings` 与东亚字体变体；摘要幽灵层只做模糊交叉过渡、不占布局且 `aria-hidden`，减少动态效果时不创建。
+11. **存储**：注释、分析、修改痕迹、卡片折叠只存在 IndexedDB（`writee` 库），永不写入 md 文件；设置与 AI 配置在 localStorage（`writee.settings`、`writee.ai`、`writee.copyopts`），打开的标签页列表在 `writee.tabs`。
+12. **动效**：统一用 `components/motion.ts`（FLIP、animateOut、smoothScroll），都要尊重 `prefers-reduced-motion`。CSS 进场动画用 `animation-fill-mode: backwards`，避免动画结束后残留 transform 覆盖其他样式。`CardEditor` 必须在 layout effect 中挂载，父级 FLIP 只能读取真实编辑器高度；E2E 要求动画终点与最终自然高度误差不超过 2px，不能把空容器高度当成终点。折叠标题与展开标题必须共享字号、行高、padding、`font-feature-settings` 与东亚字体变体。折叠/展开由 `cards/fold.ts` 处理：在 `collapsed` 变化的同步监听里（React 重渲染前）把即将移除的内容（展开前的摘要按钮 / 收起前的编辑器与子卡片）克隆成 `.card-fold-ghost`，去掉全部 `data-*`、焦点与光标层，标题在克隆里隐藏；新内容的淡入由卡片上的 `data-fold` 属性驱动的 CSS（编辑器首行即标题不参与）。**标题在任何一侧都不能模糊或淡入**。`playFlip` 在折叠时按最大高度变化量统一时长（240–460ms）与曲线 `FOLD_EASE`，且必须逐个读取元素位置（前面已开始的高度动画会推动后面的元素，批量读取会导致位移翻倍）。减少动态效果时不创建幽灵层。
 13. **调试钩子**：开发模式下 `window.__writee = { useDoc, useUI, registry, session, buildNotesPrompt, importAnalysis, buildManualPrompt }`，e2e 依赖它，改名需同步修改 `e2e/`。
-14. **表格写回**：`core/table.ts` 统一解析与序列化；Widget 产生差异后必须加 `this.from`，并交给当前视图构造 ChangeSet，不能把表格局部长度的 ChangeSet 直接 dispatch 给整篇文档。失焦提交只接受仍在部件内的当前 textarea，防止旧节点覆盖新草稿。
+14. **表格写回**：`core/table.ts` 统一解析与序列化；Widget 产生差异后必须加表格起点 `from`，并交给当前视图构造 ChangeSet，不能把表格局部长度的 ChangeSet 直接 dispatch 给整篇文档。`TableController` 挂在部件 DOM 上，`updateDOM` 原地更新（同一张表：起点或源码之一相同），提交后的焦点由 `focusRequests` 交接；重建表格时旧编辑框被移除会触发 focusout，必须用 `rendering` 标记忽略；失焦提交带 `focus: false`，不能把焦点抢回表格。编辑框覆盖在单元格上、隐藏的 `.cm-table-sizer` 撑开尺寸，保证进入编辑时列宽不变；每列按内容设置最小宽度（封顶 10em）。部件自己处理的按键要 `stopPropagation`，全局 ⌘Z 也会跳过 `defaultPrevented` 的事件，避免撤销两次。撤销/重做把光标送回变化处时，若落在渲染表格内则改为选中单元格（`renderedTableAt` + `focusTableAt`），上下方向键从正文进入表格同理，表格只在主动“编辑源码”或在源码里输入时才显示 Markdown。
 15. **本机系统动作**：`open/reveal` 复用现有限权令牌与 localhost POST 通道，不开放任意网页调用；相对路径以当前 Markdown 目录解析，OS 调用禁止 shell 拼接。网页版没有真实绝对路径时不伪造。
+16. **多标签页**：打开、切换、关闭都经过 `session.ts` 的 `serial()` 队列；内部互相调用用 `*Impl` 版本，避免排队等自己。新文档一律走 `present(id, install)`：已在前台只检查磁盘，在后台则切回，否则停放当前文档后载入并插到当前标签页之后。后台标签页不轮询磁盘，切回时检查。恢复快照期间 `quiet` 为真，跳过自动写回/存档调度。工作目录迁移会同步更新后台快照的 `sess.location`。Workspace 按 `meta.id` 重新挂载，滚动位置用 `pendingScrollFor(id)` 读取、应用后再清除（开发模式 StrictMode 会挂载两次）。
+17. **全角标点**：正文不得启用 `font-variant-east-asian: proportional-width`（pwid），并显式写 `'pwid' 0`。本机装有思源宋体时 pwid 会把 `，`、`（`、`“` 收窄成与半角相同的宽度，全角/半角逗号无法区分。
 
 ## 6. 测试
 
@@ -185,10 +190,14 @@ useDoc.applyChanges / applyTransform / replaceText
   - `ai-mock` 拦截请求模拟官方 Anthropic / 第三方 Anthropic 兼容 / OpenAI 兼容，校验请求格式与流式解析
   - `layout` 侧栏拖拽、结构标注、主题光标、320/480/720/900px 顶栏与侧栏互斥
   - `local-file` 真实本机文件读写、编码/冲突/存档、文件菜单与链接动作（动作请求拦截）
-  - `editing` 两种模式的公式、表格编辑/撤销/注释定位/粘贴/拖放/真实剪贴板
+  - `editing` 两种模式的公式、表格编辑/撤销/注释定位/粘贴/拖放/真实剪贴板；表格进入编辑列宽不变、点击落点、Enter/Tab 流程、失焦不抢焦点、右键与行列菜单、拖选、添加行、方向键进出表格与撤销后保持渲染；全角标点不启用 pwid
+  - `tabs` 多标签页：新开/切换保留正文、撤销历史、模式与滚动位置，文件型标签页切走前写回、切回载入外部修改、关闭前写回，Alt+数字、拖动排序、右键关闭其他、“+”回文档列表、左侧栏与大纲切换、刷新后恢复列表
 - 系统文件选择框、真实 API Key、输入法（IME）、Safari/Firefox、实际外部程序打开无法自动化，需人工验证。
+- 云端容器里的 headless Chromium（Playwright 1243 版）对“从 IndexedDB 取回的 OPFS 句柄”调用任何方法（`isSameEntry`、`resolve`、`queryPermission`……）都会让页面崩溃，因此 `file-sync`、`workspace` 两组在该环境必然失败（改动前同样如此）；需在本机 Chrome 上跑。`tabs` 里的文件型标签页只打开一个 OPFS 文件、不触发取回句柄，可以在两处都运行。
 
-## 7. 当前进度（更新于 2026-10-27）
+## 7. 当前进度（更新于 2026-10-28）
+
+**多标签页、表格交互、卡片折叠动效与全角标点（2026-10-28，云端会话）**：新增多标签页：每篇文档一个标签页，切换时先写回文件与存档再停放内存快照，切回原样恢复正文、撤销历史、模式、折叠与滚动位置并立即检查外部修改；关闭当前标签页切到相邻页，`+` 回到文档列表；支持中键/×关闭、拖动排序、右键“关闭其他/右侧”、Alt+1…9；标签栏默认在顶部，可移到左侧栏与大纲用开关切换（设置里也可改），刷新后恢复列表、点选再载入。表格部件重写为挂在 DOM 上的控制器并用 `updateDOM` 原地更新：进入编辑列宽不变、点击处落光标、Enter 编辑下一行、Tab 到末格新增行、方向键跨格、拖选范围、右键与行列把手菜单、悬停添加行列、浮动工具条、失焦提交不抢焦点、方向键进出表格、撤销后保持渲染；修复两处“撤销两次”（部件按键冒泡到全局、编辑器处理后焦点移入表格）。卡片折叠/展开改为克隆旧内容原位淡出、新内容模糊淡入，收起时不再先变成空框，标题两侧都不参与动画；高度与下方卡片同一曲线、按变化量定时长，并修复逐帧读取位置的位移翻倍问题。全角标点：去掉正文 `proportional-width`（本机思源宋体下 `，` 被收窄到 7px，与 `,` 无法区分），实测恢复为 18.5px。验证：类型检查、19 项单元测试、生产构建通过；新增 `tabs` E2E，`cards`、`editing` 扩充，9 组中 7 组在云端容器通过，`file-sync`、`workspace` 因容器 Chromium 对 IndexedDB 取回的 OPFS 句柄崩溃而无法运行（改动前同样失败，需在本机 Chrome 复跑）。逐帧截图检查了两种方向的折叠、表格各状态、标签栏顶部/左侧、360/720px 与墨夜主题。本次提交并推送到分支 `claude/adoring-thompson-ml3vu0`，未部署线上。
 
 **公式、表格、卡片动效、本机链接与窄屏（2026-10-27）**：新增 KaTeX 行内/块级公式（四种定界符、代码与转义排除、点击回源码）；表格改为直接编辑单元格，支持键盘与范围选择、行列增删/拖放/对齐、TSV 网格复制粘贴，所有写回经同一全文事务并对齐注释。三级卡片展开同步目标与祖先高度，新子卡不再缩放，快速切换不残留裁剪；复查发现空编辑器测高后，已改为 `CardEditor` 在 layout effect 先挂载再执行 FLIP，动画终点与最终自然高度误差 ≤ 2px；折叠/展开标题统一字体特性与间距，中文双引号同宽同位，摘要使用不占布局的模糊交叉过渡。文件菜单新增另存为、复制真实路径、文件夹显示与系统默认打开；Markdown/裸 URL/表格/wiki 链接 Ctrl+点击打开，本机经限权 POST 接口调用系统默认程序，网页版明确降级。顶栏小屏分行并收纳次要操作，侧栏覆盖且互斥，进入窄屏先展示正文。19 项单元测试、8 组 Chrome E2E、类型检查、生产构建通过；320/480/720/900px 与稳定截图已检查。OS 打开边界用注入测试验证，未在自动化中实际弹出外部应用；本次按用户要求提交并推送 GitHub，未部署线上。
 
@@ -215,7 +224,10 @@ useDoc.applyChanges / applyTransform / replaceText
 - 超长文档（> 10 万字、数百个小节）在卡片模式下每张卡片一个编辑器，未做虚拟化。
 - 存档只在本浏览器；清除站点数据会丢失注释，没有导出/导入存档功能。
 - 写回文件失败时内容只保留在浏览器存档中（顶栏显示“保存失败 · 重试”）。
-- 系统默认程序的实际外部打开未自动化（注入与请求路径已验证），需在本机确认文件关联；生产主包约 1.21MB，仍有 Vite 分包提示。
+- 系统默认程序的实际外部打开未自动化（注入与请求路径已验证），需在本机确认文件关联；生产主包约 1.24MB，仍有 Vite 分包提示。
+- 后台标签页不轮询磁盘，切回时才检查；刷新后标签页列表恢复但不自动载入（文件授权需要用户点击）。
+- 表格单元格“选中后直接打字进入编辑”未做（中文输入法在非可编辑元素上不会开始组字，需点击或 Enter 进入编辑）。
+- 2026-10-28 的改动未在本机 Chrome 跑 `file-sync`、`workspace` 两组 E2E（云端容器无法运行），请在本机补跑。
 
 **可做的下一步（按价值排序，供参考）**
 1. 存档导出 / 导入（注释与分析的备份、换电脑迁移）。
@@ -225,6 +237,7 @@ useDoc.applyChanges / applyTransform / replaceText
 5. 卡片视图虚拟化，支持超长文档。
 6. 结构分析分块（超长文章分段请求再合并）。
 7. 按需拆分 KaTeX 与编辑器主包，消除 Vite 分包提示。
+8. 标签页：后台标签页低频轮询外部修改；标签页分组或固定。
 
 ## 8. 常见坑
 

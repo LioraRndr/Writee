@@ -17,8 +17,12 @@
   padding: 0 !important;
   /* 覆盖 CodeMirror 默认的黑色原生光标，主编辑器和卡片均跟随主题 */
   caret-color: var(--accent) !important;
-  font-variant-east-asian: proportional-width;
-  font-feature-settings: 'kern', 'liga', 'palt' 0;
+  /*
+   * 全角标点保持全宽：本机装有思源宋体时，proportional-width（pwid）会把“，”“（”等
+   * 收窄成与半角相同的宽度，全角与半角逗号就无法区分了。
+   */
+  font-variant-east-asian: normal;
+  font-feature-settings: 'kern', 'liga', 'palt' 0, 'pwid' 0;
   letter-spacing: 0.012em;
   text-align: justify;
   hyphens: auto;
@@ -328,29 +332,50 @@
 }
 
 .cm-md-table {
+  position: relative;
   max-width: 100%;
-  margin: 0.55em 0 0.95em;
+  margin: 0.55em 0 1.15em;
   cursor: text;
   border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--bg-elev);
-  container-type: inline-size;
+  transition: border-color 0.15s;
 }
+.cm-md-table:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+}
+
+/* 浮动工具条：只在表格获得焦点时浮在表格右上方，不占正文行高 */
 .cm-table-toolbar {
+  position: absolute;
+  right: 6px;
+  bottom: calc(100% + 6px);
+  z-index: 6;
   display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  padding: 5px 6px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-sunken);
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  transition: opacity 0.15s, transform 0.15s var(--ease), visibility 0s 0.15s;
+}
+.cm-md-table:focus-within > .cm-table-toolbar {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.15s, transform 0.15s var(--ease);
 }
 .cm-table-toolbar button {
   min-width: 30px;
   height: 25px;
   padding: 0 7px;
   border-radius: 6px;
-  color: var(--ink-3);
-  font: 11px/1 var(--font-ui);
+  color: var(--ink-2);
+  font: 11.5px/1 var(--font-ui);
   white-space: nowrap;
 }
 .cm-table-toolbar button:hover:not(:disabled),
@@ -359,21 +384,23 @@
   background: var(--accent-soft);
   outline: none;
 }
+.cm-table-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .cm-table-scroll {
   max-inline-size: 100%;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: inherit;
   outline: none;
-  overscroll-behavior: contain;
-  container-type: inline-size;
+  overscroll-behavior-x: contain;
 }
-.cm-table-scroll:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--accent-soft);
-}
+/* 表格占满正文宽度，长文字在格内换行；列太多时才横向滚动 */
 .cm-md-table table {
   border-collapse: separate;
   border-spacing: 0;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   font-size: 0.9em;
   line-height: 1.7;
 }
@@ -383,7 +410,11 @@
   padding: 0;
   border-bottom: 1px solid var(--line);
   text-align: left;
-  vertical-align: stretch;
+  vertical-align: top;
+}
+.cm-md-table th[data-col] + th[data-col],
+.cm-md-table td[data-col] + td[data-col] {
+  border-left: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
 }
 .cm-md-table th {
   font-weight: 600;
@@ -392,28 +423,34 @@
 .cm-md-table tr:last-child td {
   border-bottom: 0;
 }
+.cm-md-table tbody tr:hover > td[data-col] {
+  background: color-mix(in srgb, var(--ink) 2.5%, transparent);
+}
 .cm-table-cell {
-  min-width: 5.5em;
-  min-height: 36px;
+  position: relative;
+  min-width: 4.5em;
   padding: 0.45em 0.8em;
-  border: 0;
-  border-radius: 4px;
   outline: none;
   color: var(--ink);
-  background: transparent;
   font: inherit;
   line-height: inherit;
   text-align: inherit;
   cursor: text;
+  transition: background 0.12s;
 }
-.cm-table-cell.is-selected {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+.cm-md-table th .cm-table-cell {
+  padding-top: 0.7em;
 }
+/* 选区只在表格获得焦点时显示，静止的表格保持干净 */
+.cm-md-table:focus-within .cm-table-cell.is-selected {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.cm-md-table:focus-within .cm-table-cell.is-cursor,
 div.cm-table-cell:focus-visible {
-  background: var(--accent-soft);
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
 }
-.cm-table-value {
+.cm-table-value,
+.cm-table-sizer {
   display: block;
   min-height: 1.7em;
   overflow-wrap: anywhere;
@@ -423,21 +460,44 @@ div.cm-table-cell:focus-visible {
   cursor: pointer;
   text-underline-offset: 0.2em;
 }
-.cm-table-editor {
-  display: block;
-  width: 100%;
-  min-width: 8em;
-  resize: none;
-  overflow: hidden;
+/* 编辑中：文本框覆盖整格，隐藏的同样式文本负责撑开尺寸，进入编辑与输入时列宽不跳 */
+.cm-table-cell.is-editing {
   background: var(--bg);
   box-shadow: inset 0 0 0 2px var(--accent);
 }
+.cm-table-sizer {
+  visibility: hidden;
+  white-space: pre-wrap;
+  hyphens: manual;
+}
+.cm-table-editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: inherit;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  hyphens: manual;
+  caret-color: var(--accent);
+}
 .cm-table-gutter {
-  width: 28px;
-  min-width: 28px;
-  padding: 0 3px !important;
+  width: 22px;
+  min-width: 22px;
+  padding: 0 !important;
   text-align: center !important;
-  background: var(--bg-sunken);
+  vertical-align: middle !important;
 }
 .cm-table-row-handle,
 .cm-table-col-handle {
@@ -445,48 +505,162 @@ div.cm-table-cell:focus-visible {
   align-items: center;
   justify-content: center;
   color: var(--ink-3);
-  opacity: 0.35;
+  opacity: 0;
   cursor: grab;
   border-radius: 4px;
-  font: 11px/1 var(--font-ui);
+  font: 10px/1 var(--font-ui);
+  letter-spacing: -0.12em;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
 }
 .cm-table-row-handle {
-  width: 20px;
-  height: 28px;
+  width: 18px;
+  height: 26px;
 }
 .cm-table-col-handle {
   position: absolute;
-  top: 2px;
-  right: 3px;
-  width: 18px;
-  height: 12px;
-  font-size: 8px;
+  z-index: 1;
+  top: 1px;
+  left: 50%;
+  width: 28px;
+  height: 13px;
+  margin-left: -14px;
+  font-size: 9px;
+}
+.cm-md-table tbody tr:hover .cm-table-row-handle,
+.cm-md-table th:hover .cm-table-col-handle,
+.cm-table-row-handle:focus-visible,
+.cm-table-col-handle:focus-visible {
+  opacity: 1;
 }
 .cm-table-row-handle:hover,
-.cm-table-row-handle:focus-visible,
-.cm-table-col-handle:hover,
-.cm-table-col-handle:focus-visible,
-.cm-md-table th:hover .cm-table-col-handle {
+.cm-table-col-handle:hover {
   color: var(--accent);
   background: var(--accent-soft);
-  opacity: 1;
   outline: none;
 }
-.cm-md-table th .cm-table-cell {
-  padding-top: 0.85em;
+.is-dragging-row,
+.is-dragging-col {
+  cursor: grabbing;
 }
 .is-table-drop-target {
   background: var(--accent-soft) !important;
+}
+tr.is-table-drop-target > td {
+  box-shadow: inset 0 2px var(--accent);
+}
+tr.is-table-drop-target.is-drop-after > td {
   box-shadow: inset 0 -2px var(--accent);
 }
-.cm-table-status {
-  display: block;
-  padding: 0 10px;
-  color: var(--accent);
-  font-size: 11px;
+th.is-table-drop-target,
+td.is-table-drop-target {
+  box-shadow: inset 2px 0 var(--accent);
 }
-.cm-table-status:not(:empty) {
-  padding-bottom: 6px;
+th.is-table-drop-target.is-drop-after,
+td.is-table-drop-target.is-drop-after {
+  box-shadow: inset -2px 0 var(--accent);
+}
+
+/* 悬停时在表格下方 / 右侧出现添加行列的细条 */
+.cm-table-add-row,
+.cm-table-add-col {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  background: var(--bg-elev);
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
+  font: 600 12px/1 var(--font-ui);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+.cm-table-add-row::before,
+.cm-table-add-col::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+.cm-table-add-row {
+  left: 22px;
+  right: 0;
+  top: calc(100% + 3px);
+  height: 15px;
+}
+.cm-table-add-col {
+  top: 0;
+  bottom: 0;
+  left: calc(100% + 3px);
+  width: 15px;
+}
+.cm-md-table:hover > .cm-table-add-row,
+.cm-md-table:hover > .cm-table-add-col,
+.cm-md-table:focus-within > .cm-table-add-row,
+.cm-md-table:focus-within > .cm-table-add-col {
+  opacity: 0.75;
+  pointer-events: auto;
+}
+.cm-md-table > .cm-table-add-row:hover,
+.cm-md-table > .cm-table-add-col:hover {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.cm-table-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 168px;
+  padding: 5px;
+  border-radius: 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  font: 13px/1.2 var(--font-ui);
+  text-align: left;
+  animation: pop 0.14s var(--ease);
+  cursor: default;
+}
+.cm-table-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+}
+.cm-table-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.cm-table-menu-item.is-danger {
+  color: var(--nc-cinnabar);
+}
+.cm-table-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cm-table-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+.cm-table-status {
+  position: absolute;
+  z-index: 3;
+  right: 6px;
+  top: calc(100% + 4px);
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--accent);
+  font: 11px/1.6 var(--font-ui);
+  pointer-events: none;
+}
+.cm-table-status:empty {
+  display: none;
 }
 .cm-md-table code {
   background: var(--code-bg);

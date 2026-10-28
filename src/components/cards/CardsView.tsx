@@ -1,5 +1,5 @@
 import { ALT, SHIFT } from '../../core/platform'
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useReducer, useRef } from 'react'
 import { useDoc } from '../../store/docStore'
 import { useUI } from '../../store/uiStore'
 import { cardDepth, structureKey, type Section } from '../../core/sections'
@@ -7,7 +7,8 @@ import { registry } from '../../editor/registry'
 import { CardEditor } from './CardEditor'
 import { cardFocus } from './focus'
 import { startTreeDrag } from './dnd'
-import { animateOut, flash, measure, playFlip, reducedMotion, type Snapshot } from '../motion'
+import { animateOut, flash, measure, playFlip, type Snapshot } from '../motion'
+import { beginFold, clearFold } from './fold'
 import { Menu } from '../Menu'
 import {
   IconChevron,
@@ -66,14 +67,22 @@ export function CardsView() {
       const b = new Set(p.collapsed)
       const toggled = new Set([...a].filter((x) => !b.has(x)).concat([...b].filter((x) => !a.has(x))))
       const heightIds = new Set(toggled)
+      const outer: HTMLElement[] = []
       for (const id of toggled) {
-        let el = root.current?.querySelector(`[data-card="${id}"]`)?.parentElement
-        while (el && el !== root.current) {
-          if (el.hasAttribute('data-card')) heightIds.add(el.getAttribute('data-card')!)
-          el = el.parentElement
+        const card = root.current?.querySelector<HTMLElement>(`[data-card="${id}"]`)
+        if (!card) continue
+        let nested = false
+        for (let el = card.parentElement; el && el !== root.current; el = el.parentElement) {
+          const pid = el.getAttribute('data-card')
+          if (!pid) continue
+          heightIds.add(pid)
+          if (toggled.has(pid)) nested = true
         }
+        if (!nested) outer.push(card)
       }
       snap.current = measure(root.current, 'data-card', heightIds)
+      // 此时 React 尚未重渲染：先把即将移除的内容做成幽灵层（嵌套的切换由最外层一并处理）
+      for (const card of outer) beginFold(card, !a.has(card.getAttribute('data-card')!), registry.scroller())
     })
     return () => {
       unsub()
@@ -84,7 +93,11 @@ export function CardsView() {
 
   useLayoutEffect(() => {
     if (snap.current) {
-      playFlip(root.current, 'data-card', snap.current, { enter: true })
+      playFlip(root.current, 'data-card', snap.current, {
+        enter: true,
+        // 展开中的卡片整体做模糊淡入，子卡片不再单独入场
+        skipEnter: (el) => !!el.parentElement?.closest('[data-fold="opening"]'),
+      })
       snap.current = null
     }
     registry.requestLayout()
@@ -163,10 +176,13 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
   const collapsed = useUI((st) => st.collapsed.includes(s.id))
   const el = useRef<HTMLElement>(null)
   const id = s.id
-  const [leavingPreview, setLeavingPreview] = useState<string | null>(null)
-  const revealTimer = useRef(0)
 
-  useEffect(() => () => window.clearTimeout(revealTimer.current), [])
+  useEffect(() => {
+    const card = el.current
+    return () => {
+      if (card) clearFold(card)
+    }
+  }, [])
   useEffect(() => {
     if (!collapsed || !el.current) return
     const entry = {
@@ -181,15 +197,7 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
 
   const doc = () => useDoc.getState()
   const preview = collapsed ? collapsedPreview(s) : null
-  const toggle = () => {
-    window.clearTimeout(revealTimer.current)
-    if (collapsed) {
-      const next = preview && !reducedMotion() ? preview : null
-      setLeavingPreview(next)
-      if (next) revealTimer.current = window.setTimeout(() => setLeavingPreview(null), 320)
-    } else setLeavingPreview(null)
-    useUI.getState().toggleCollapsed(id)
-  }
+  const toggle = () => useUI.getState().toggleCollapsed(id)
 
   const moveKeepingFocus = (dir: 'up' | 'down' | 'left' | 'right') => {
     const focused = registry.focused()
@@ -238,7 +246,7 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
   return (
     <section
       ref={el}
-      className={'card d' + Math.min(depth, 4) + (collapsed ? ' is-collapsed' : '') + (leavingPreview ? ' is-revealing' : '')}
+      className={'card d' + Math.min(depth, 4) + (collapsed ? ' is-collapsed' : '')}
       data-drag-item={id}
       data-depth={depth}
       data-card={id}
@@ -340,12 +348,6 @@ function Card({ section: s, depth, root }: { section: Section; depth: number; ro
             </div>
           )}
         </>
-      )}
-      {leavingPreview && (
-        <div className="card-collapsed-ghost" aria-hidden={true}>
-          <span className={'card-collapsed-title h' + s.level}>{s.heading?.text || '（无标题）'}</span>
-          <span className="card-collapsed-preview">{leavingPreview}</span>
-        </div>
       )}
       <button
         className="card-add-below"

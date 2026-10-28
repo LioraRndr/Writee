@@ -39,6 +39,21 @@ export function SettingsDialog() {
           <input type="range" min={560} max={960} step={20} value={s.width} onChange={(e) => set({ width: +e.target.value })} />
           <span className="setting-val">{s.width}px</span>
         </label>
+        <div className="setting-row">
+          <span>标签页</span>
+          <div className="seg small">
+            <button className={s.tabsPosition === 'top' ? 'is-on' : ''} onClick={() => set({ tabsPosition: 'top', leftPanel: 'outline' })}>
+              顶部
+            </button>
+            <button
+              className={s.tabsPosition === 'left' ? 'is-on' : ''}
+              onClick={() => set({ tabsPosition: 'left', leftPanel: 'tabs', outlineOpen: true })}
+            >
+              左侧栏（与大纲切换）
+            </button>
+          </div>
+          <span className="setting-val" />
+        </div>
         <label className="setting-row check">
           <input type="checkbox" checked={s.livePreview} onChange={(e) => set({ livePreview: e.target.checked })} />
           <span>

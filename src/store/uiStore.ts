@@ -16,6 +16,10 @@ export interface Settings {
   outlineWidth: number
   /** 右侧注释 / 结构栏宽度（px） */
   railWidth: number
+  /** 标签页栏位置：顶部，或放进左侧栏与大纲切换 */
+  tabsPosition: 'top' | 'left'
+  /** 标签页在左侧时，左侧栏当前显示的面板 */
+  leftPanel: 'outline' | 'tabs'
 }
 
 export const THEMES: { id: ThemeId; name: string; desc: string; swatch: [string, string, string] }[] = [
@@ -37,6 +41,8 @@ const DEFAULTS: Settings = {
   railOpen: true,
   outlineWidth: 252,
   railWidth: 304,
+  tabsPosition: 'top',
+  leftPanel: 'outline',
 }
 
 export const SIZE_LIMITS = {

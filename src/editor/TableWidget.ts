@@ -77,14 +77,10 @@ function textEm(text: string) {
 }
 
 /**
- * 每列的最小宽度：短内容（如“直接成稿”）不被长单元格挤到折行，
- * 长内容封顶 10em，仍在格内换行。
+ * 短内容（如“直接成稿”）整格不折行，长单元格变宽时不会把它挤成两行；
+ * 长内容照常在格内换行，表格因此能按内容收缩到版心以内。
  */
-function columnMinEm(model: TableModel, col: number) {
-  let longest = 0
-  for (const row of model.rows) for (const line of (row[col] ?? '').split('\n')) longest = Math.max(longest, textEm(line))
-  return Math.min(10, Math.max(3, longest * 1.03)) + 2.1
-}
+const isShort = (raw: string) => !!raw && !raw.includes('\n') && textEm(raw) <= 6
 
 /** 鼠标位置对应的文本偏移（只在渲染文字与源码一致时使用） */
 function caretFromPoint(cell: HTMLElement, x: number, y: number, raw: string): Caret {
@@ -176,6 +172,7 @@ class TableController {
   private cursor: CellPos
   private editing: CellPos | null = null
   private draft = ''
+  private editWidth = 0
   private press: { pos: CellPos; caret: Caret; moved: boolean; shift: boolean } | null = null
   private drag: { kind: 'row' | 'col'; index: number } | null = null
   private focusSeq = 0
@@ -313,6 +310,8 @@ class TableController {
     if (this.editing && samePos(this.editing, { row, col })) {
       // 编辑框覆盖在单元格上，隐藏的同字号文本撑开尺寸：进入编辑时列宽不跳动，输入时自然增高
       const box = el('div', 'cm-table-cell is-editing')
+      // 保持进入编辑前的格宽，列宽不会因为改为可换行的编辑框而收缩
+      if (this.editWidth) box.style.minWidth = this.editWidth + 'px'
       const sizer = el('span', 'cm-table-sizer', this.draft + '​')
       sizer.setAttribute('aria-hidden', 'true')
       const input = el('textarea', 'cm-table-editor')
@@ -324,7 +323,7 @@ class TableController {
       box.append(sizer, input)
       return box
     }
-    const cell = el('div', 'cm-table-cell')
+    const cell = el('div', 'cm-table-cell' + (isShort(raw) ? ' is-short' : ''))
     cell.dataset.cell = `${row}:${col}`
     cell.tabIndex = -1
     cell.setAttribute('role', 'gridcell')
@@ -349,7 +348,6 @@ class TableController {
       const th = el('th')
       th.dataset.col = String(col)
       th.style.textAlign = this.model.aligns[col]
-      th.style.minWidth = columnMinEm(this.model, col).toFixed(2) + 'em'
       const grip = button('cm-table-col-handle', '•••', '拖动调整列顺序，点击打开列菜单')
       grip.dataset.colHandle = String(col)
       grip.draggable = true
@@ -425,8 +423,14 @@ class TableController {
     input.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }
 
+  /** 记下即将进入编辑的格子当前宽度 */
+  private keepWidth(pos: CellPos) {
+    this.editWidth = this.wrap.querySelector<HTMLElement>(`div.cm-table-cell[data-cell="${pos.row}:${pos.col}"]`)?.offsetWidth ?? 0
+  }
+
   private startEdit(pos: CellPos, caret: Caret = 'end') {
     this.closeMenu()
+    this.keepWidth(this.clamp(pos))
     this.editing = this.clamp(pos)
     this.draft = this.model.rows[this.editing.row][this.editing.col]
     this.anchor = { ...this.editing }
@@ -448,6 +452,7 @@ class TableController {
     this.cursor = this.clamp(req.cursor)
     this.editing = null
     if (req.edit) {
+      this.keepWidth(this.cursor)
       this.editing = { ...this.cursor }
       this.draft = this.model.rows[this.cursor.row][this.cursor.col]
     }

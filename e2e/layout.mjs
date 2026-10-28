@@ -72,7 +72,7 @@ export default async function ({ page }) {
     }
   }
 
-  // 小屏：顶栏不重叠，正文先可见；同一时间只打开一个覆盖侧栏
+  // 小屏：顶栏不重叠，正文先可见；左侧栏挤压正文、右栏覆盖，同一时间只打开一个
   await page.getByRole('button', { name: '编辑', exact: true }).click()
   await page.evaluate(() => window.__writee.useUI.getState().setSettings({ outlineOpen: true, railOpen: true, theme: 'xuan' }))
   for (const width of [320, 480, 720, 900]) {
@@ -82,7 +82,7 @@ export default async function ({ page }) {
       assertEq(await page.evaluate(() => {
         const s = window.__writee.useUI.getState().settings
         return [s.outlineOpen, s.railOpen]
-      }), [false, false], '进入小屏先收起两个覆盖侧栏，展示正文')
+      }), [false, false], '进入小屏先收起两个侧栏，展示正文')
     } else {
       await page.evaluate(() => window.__writee.useUI.getState().setSettings({ outlineOpen: false, railOpen: false }))
       await page.waitForTimeout(50)
@@ -118,9 +118,25 @@ export default async function ({ page }) {
     assertEq(result.out, [], `${width}px 顶栏按钮不超出视口`)
     assert(result.textWidth >= Math.min(240, width - 32), `${width}px 正文应有可用宽度，实际 ${result.textWidth}`)
     assert(result.topbarHeight <= 140, `${width}px 顶栏不应过高`)
-    assert(['absolute', 'fixed'].includes(result.outlinePosition) && ['absolute', 'fixed', 'closed'].includes(result.railPosition), `${width}px 侧栏应覆盖而非挤压正文`)
+    assert(!['absolute', 'fixed'].includes(result.outlinePosition), `${width}px 左侧栏不应覆盖在正文上`)
+    assert(['absolute', 'fixed', 'closed'].includes(result.railPosition), `${width}px 右栏覆盖显示`)
 
     await page.locator('.topbar-left .icon-btn').first().click()
+    await page.waitForTimeout(400)
+    const pushed = await page.evaluate(() => {
+      const outline = document.querySelector('.outline-wrap').getBoundingClientRect()
+      const scroller = document.querySelector('.scroller').getBoundingClientRect()
+      return { outlineRight: outline.right, outlineWidth: outline.width, scrollerLeft: scroller.left, scrollerWidth: scroller.width, docWidth: document.documentElement.scrollWidth }
+    })
+    assert(pushed.outlineWidth > 100 && pushed.scrollerLeft >= pushed.outlineRight - 1, `${width}px 打开大纲时挤压右侧正文：${JSON.stringify(pushed)}`)
+    assert(pushed.outlineWidth <= width * 0.46 + 1 && pushed.docWidth <= width + 1, `${width}px 大纲宽度封顶且页面不横向溢出：${JSON.stringify(pushed)}`)
+    assertEq(await page.evaluate(() => window.__writee.useUI.getState().settings.outlineOpen), true, `${width}px 大纲已打开`)
+    // 切换标签页（Workspace 重新挂载）不应把已打开的大纲收起
+    await page.evaluate(() => window.__writee.session.openFromFile(new File(['# 另一篇\n\n## 节\n'], `layout-${innerWidth}.md`)))
+    await page.waitForTimeout(250)
+    assertEq(await page.evaluate(() => window.__writee.useUI.getState().settings.outlineOpen), true, `${width}px 新开标签页后大纲保持打开`)
+    await page.locator('.tab', { hasText: '示例' }).click()
+    await page.waitForTimeout(250)
     await page.locator('.topbar-right button[title="注释侧栏"]').click()
     await page.waitForTimeout(80)
     assertEq(await page.evaluate(() => {

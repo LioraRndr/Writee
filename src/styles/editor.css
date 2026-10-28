@@ -302,25 +302,88 @@
   border-radius: 6px;
   padding: 0 0.5em;
 }
-.cm-md-table {
-  margin: 0.4em 0 0.8em;
+.cm-md-math {
+  color: var(--ink);
+  cursor: text;
+}
+.cm-md-math .katex {
+  font-size: 1.06em;
+  color: inherit;
+}
+.cm-md-math.is-block {
+  margin: 0.65em 0 1em;
+  padding: 0.35em 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  container-type: inline-size;
+}
+.cm-md-math.is-block .katex-display {
+  margin: 0;
+}
+.cm-md-math.has-error {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--nc-cinnabar);
+  border-bottom: 1px dashed currentColor;
+}
+
+.cm-md-table {
+  max-width: 100%;
+  margin: 0.55em 0 0.95em;
   cursor: text;
   border-radius: 10px;
   border: 1px solid var(--line);
+  background: var(--bg-elev);
+  container-type: inline-size;
+}
+.cm-table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+.cm-table-toolbar button {
+  min-width: 30px;
+  height: 25px;
+  padding: 0 7px;
+  border-radius: 6px;
+  color: var(--ink-3);
+  font: 11px/1 var(--font-ui);
+  white-space: nowrap;
+}
+.cm-table-toolbar button:hover:not(:disabled),
+.cm-table-toolbar button:focus-visible {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+.cm-table-scroll {
+  max-inline-size: 100%;
+  overflow: auto;
+  outline: none;
+  overscroll-behavior: contain;
+  container-type: inline-size;
+}
+.cm-table-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
 }
 .cm-md-table table {
-  border-collapse: collapse;
-  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
   font-size: 0.9em;
   line-height: 1.7;
 }
 .cm-md-table th,
 .cm-md-table td {
-  padding: 0.45em 0.9em;
+  position: relative;
+  padding: 0;
   border-bottom: 1px solid var(--line);
   text-align: left;
-  vertical-align: top;
+  vertical-align: stretch;
 }
 .cm-md-table th {
   font-weight: 600;
@@ -329,13 +392,114 @@
 .cm-md-table tr:last-child td {
   border-bottom: 0;
 }
-.cm-md-table tr + tr td {
-  border-top: 0;
+.cm-table-cell {
+  min-width: 5.5em;
+  min-height: 36px;
+  padding: 0.45em 0.8em;
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  cursor: text;
+}
+.cm-table-cell.is-selected {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+div.cm-table-cell:focus-visible {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.cm-table-value {
+  display: block;
+  min-height: 1.7em;
+  overflow-wrap: anywhere;
+}
+.cm-table-value a {
+  color: var(--accent);
+  cursor: pointer;
+  text-underline-offset: 0.2em;
+}
+.cm-table-editor {
+  display: block;
+  width: 100%;
+  min-width: 8em;
+  resize: none;
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.cm-table-gutter {
+  width: 28px;
+  min-width: 28px;
+  padding: 0 3px !important;
+  text-align: center !important;
+  background: var(--bg-sunken);
+}
+.cm-table-row-handle,
+.cm-table-col-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  opacity: 0.35;
+  cursor: grab;
+  border-radius: 4px;
+  font: 11px/1 var(--font-ui);
+}
+.cm-table-row-handle {
+  width: 20px;
+  height: 28px;
+}
+.cm-table-col-handle {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  width: 18px;
+  height: 12px;
+  font-size: 8px;
+}
+.cm-table-row-handle:hover,
+.cm-table-row-handle:focus-visible,
+.cm-table-col-handle:hover,
+.cm-table-col-handle:focus-visible,
+.cm-md-table th:hover .cm-table-col-handle {
+  color: var(--accent);
+  background: var(--accent-soft);
+  opacity: 1;
+  outline: none;
+}
+.cm-md-table th .cm-table-cell {
+  padding-top: 0.85em;
+}
+.is-table-drop-target {
+  background: var(--accent-soft) !important;
+  box-shadow: inset 0 -2px var(--accent);
+}
+.cm-table-status {
+  display: block;
+  padding: 0 10px;
+  color: var(--accent);
+  font-size: 11px;
+}
+.cm-table-status:not(:empty) {
+  padding-bottom: 6px;
 }
 .cm-md-table code {
   background: var(--code-bg);
   border-radius: 4px;
   padding: 0.05em 0.3em;
+}
+.cm-table-math .katex {
+  font-size: 1em;
+}
+.cm-table-math.is-display {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* ---------- 标签（注释） ---------- */

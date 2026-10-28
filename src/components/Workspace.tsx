@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
 import { useDoc } from '../store/docStore'
 import { useUI } from '../store/uiStore'
+import { openDocumentLink } from '../store/session'
 import { useSel } from '../editor/setup'
 import { posBox, registry } from '../editor/registry'
 import { tagInfo } from '../core/derive'
@@ -15,6 +16,7 @@ import { TagPicker } from './rail/TagPicker'
 import { Outline } from './Outline'
 import { Resizer } from './Resizer'
 import { Menu } from './Menu'
+import { useMediaQuery } from './hooks'
 import { IconLayers, IconLink, IconNote, IconTag, IconTrash, IconPlus } from './icons'
 import { ALT, MOD } from '../core/platform'
 
@@ -321,6 +323,14 @@ export function Workspace() {
   const linkNote = useUI((s) => s.linkNote)
   const scroller = useRef<HTMLDivElement>(null)
   const page = useRef<HTMLDivElement>(null)
+  const overlay = useMediaQuery('(max-width: 900px)')
+
+  useEffect(() => {
+    if (overlay) useUI.getState().setSettings({ outlineOpen: false, railOpen: false })
+  }, [overlay])
+  useEffect(() => {
+    if (overlay && settings.outlineOpen && settings.railOpen) useUI.getState().setSettings({ outlineOpen: false })
+  }, [overlay, settings.outlineOpen, settings.railOpen])
 
   useLayoutEffect(() => {
     registry.setPage(page.current, scroller.current)
@@ -362,8 +372,17 @@ export function Workspace() {
     }
     const unit = target.closest<HTMLElement>('[data-unit]')
     if (unit && useUI.getState().rail === 'structure') useUI.setState({ activeUnit: unit.dataset.unit! })
-    const link = target.closest<HTMLElement>('.cm-md-link[data-href]')
-    if (link && (e.metaKey || e.ctrlKey)) window.open(link.dataset.href, '_blank', 'noopener')
+    const link = target.closest<HTMLElement>('[data-href],.cm-md-table a[href]')
+    if (link) {
+      const href = link.dataset.href ?? link.getAttribute('href')
+      if (href && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        e.stopPropagation()
+        void openDocumentLink(href)
+        return
+      }
+      if (link.closest('.cm-md-table')) e.preventDefault()
+    }
     // 点击正文空白处：取消注释激活状态
     if (!tagText && !target.closest('.note') && useUI.getState().activeNote && target.closest('.text-col')) {
       useUI.setState({ activeNote: null })

@@ -71,4 +71,72 @@ export default async function ({ page }) {
       if (theme === 'dusk' || theme === 'ink') await shot(page, `caret-${mode === '编辑' ? 'editor' : 'cards'}-${theme}`)
     }
   }
+
+  // 小屏：顶栏不重叠，正文先可见；同一时间只打开一个覆盖侧栏
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await page.evaluate(() => window.__writee.useUI.getState().setSettings({ outlineOpen: true, railOpen: true, theme: 'xuan' }))
+  for (const width of [320, 480, 720, 900]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(250)
+    if (width === 320) {
+      assertEq(await page.evaluate(() => {
+        const s = window.__writee.useUI.getState().settings
+        return [s.outlineOpen, s.railOpen]
+      }), [false, false], '进入小屏先收起两个覆盖侧栏，展示正文')
+    } else {
+      await page.evaluate(() => window.__writee.useUI.getState().setSettings({ outlineOpen: false, railOpen: false }))
+      await page.waitForTimeout(50)
+    }
+    const result = await page.evaluate(() => {
+      const overlap = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+      const buttons = [...document.querySelectorAll('.topbar button')].filter((el) => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+      const rects = buttons.map((el) => ({ el, rect: el.getBoundingClientRect() }))
+      const overlaps = []
+      const out = []
+      rects.forEach((a, i) => {
+        const name = a.el.title || a.el.textContent.trim().slice(0, 20)
+        if (a.rect.left < -1 || a.rect.right > innerWidth + 1 || a.rect.top < -1) out.push(name)
+        rects.slice(i + 1).forEach((b) => { if (overlap(a.rect, b.rect)) overlaps.push([name, b.el.title || b.el.textContent.trim().slice(0, 20)]) })
+      })
+      const scroller = document.querySelector('.scroller')
+      const rail = document.querySelector('.rail')
+      return {
+        docWidth: document.documentElement.scrollWidth,
+        scrollerWidth: scroller.scrollWidth,
+        scrollerClient: scroller.clientWidth,
+        overlaps,
+        out,
+        textWidth: document.querySelector('.text-col').getBoundingClientRect().width,
+        topbarHeight: document.querySelector('.topbar').getBoundingClientRect().height,
+        outlinePosition: getComputedStyle(document.querySelector('.outline-wrap')).position,
+        railPosition: rail ? getComputedStyle(rail).position : 'closed',
+        viewport: innerWidth,
+      }
+    })
+    assert(result.docWidth <= width + 1 && result.scrollerWidth <= result.scrollerClient + 1, `${width}px 页面不应横向溢出：${JSON.stringify(result)}`)
+    assertEq(result.overlaps, [], `${width}px 顶栏按钮不重叠`)
+    assertEq(result.out, [], `${width}px 顶栏按钮不超出视口`)
+    assert(result.textWidth >= Math.min(240, width - 32), `${width}px 正文应有可用宽度，实际 ${result.textWidth}`)
+    assert(result.topbarHeight <= 140, `${width}px 顶栏不应过高`)
+    assert(['absolute', 'fixed'].includes(result.outlinePosition) && ['absolute', 'fixed', 'closed'].includes(result.railPosition), `${width}px 侧栏应覆盖而非挤压正文`)
+
+    await page.locator('.topbar-left .icon-btn').first().click()
+    await page.locator('.topbar-right button[title="注释侧栏"]').click()
+    await page.waitForTimeout(80)
+    assertEq(await page.evaluate(() => {
+      const s = window.__writee.useUI.getState().settings
+      return [s.outlineOpen, s.railOpen]
+    }), [false, true], `${width}px 打开右栏时关闭大纲`)
+    assert(['absolute', 'fixed'].includes(await page.locator('.rail').evaluate((el) => getComputedStyle(el).position)), `${width}px 右栏覆盖显示`)
+    await page.locator('.topbar-right button[title="注释侧栏"]').click()
+
+    if (width <= 680) {
+      await page.locator('.topbar-right button[title="更多"]').click()
+      assert(await page.getByText('AI 设置', { exact: true }).isVisible(), `${width}px 更多菜单保留 AI 设置`)
+      assert(await page.getByText('外观与偏好', { exact: true }).isVisible(), `${width}px 更多菜单保留外观设置`)
+      await page.keyboard.press('Escape')
+    }
+    await shot(page, `responsive-${width}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
 }

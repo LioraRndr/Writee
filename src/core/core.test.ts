@@ -122,3 +122,78 @@ describe('analysis import', () => {
     expect(a.summary?.thesis).toBe('t')
   })
 })
+
+describe('math ranges', () => {
+  async function loadMath() {
+    const modulePath = './math'
+    return import(/* @vite-ignore */ modulePath)
+  }
+
+  it('识别美元与反斜杠定界的行内、块级公式', async () => {
+    const { findMathRanges } = await loadMath()
+    const text = String.raw`行内 $x^2$ 与 \(y_1\)。
+
+$$\frac{a}{b}$$
+
+\[
+\sqrt{x}
+\]`
+    const ranges = findMathRanges(text)
+    expect(ranges.map((r: { source: string }) => r.source)).toEqual(['x^2', 'y_1', String.raw`\frac{a}{b}`, '\n\\sqrt{x}\n'])
+    expect(ranges.map((r: { display: boolean }) => r.display)).toEqual([false, false, true, true])
+  })
+
+  it('跳过转义美元、排除范围、未闭合公式与普通金额', async () => {
+    const { findMathRanges } = await loadMath()
+    const text = String.raw`\$x$ 与 $ok$、价格 $100 和 $200、$未闭合`
+    const excluded = { from: text.indexOf('$ok$'), to: text.indexOf('$ok$') + 4 }
+    expect(findMathRanges(text, [excluded])).toEqual([])
+  })
+})
+
+describe('table model', () => {
+  async function loadTable() {
+    const modulePath = './table'
+    return import(/* @vite-ignore */ modulePath)
+  }
+
+  it('解析并原样序列化转义竖线、对齐和单元格换行', async () => {
+    const { parseTable, serializeTable } = await loadTable()
+    const source = '| 名称 | 数值 | 备注 |\n| :--- | ---: | :---: |\n| A\\|B | 1 | 一<br>二 |'
+    const model = parseTable(source)
+    expect(model.rows[1]).toEqual(['A|B', '1', '一\n二'])
+    expect(model.aligns).toEqual(['left', 'right', 'center'])
+    expect(serializeTable(model)).toBe(source)
+  })
+
+  it('单元格与行列操作不可变并保留表头对齐', async () => {
+    const { parseTable, updateCell, moveRow, moveColumn, insertRow, deleteRow, insertColumn, deleteColumn, setAlign, serializeTable } = await loadTable()
+    const base = parseTable('| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |')
+    const changed = updateCell(base, 1, 0, '新|值')
+    expect(serializeTable(changed)).toContain('新\\|值')
+    expect(base.rows[1][0]).toBe('1')
+    expect(moveRow(base, 2, 1).rows.slice(1)).toEqual([['3', '4'], ['1', '2']])
+    expect(moveColumn(base, 0, 1).rows[0]).toEqual(['B', 'A'])
+    expect(insertRow(base, 1, ['x', 'y']).rows[1]).toEqual(['x', 'y'])
+    expect(deleteRow(base, 1).rows).toEqual(base.rows.filter((_: string[], i: number) => i !== 1))
+    expect(insertColumn(base, 1).rows.every((r: string[]) => r.length === 3)).toBe(true)
+    expect(deleteColumn(insertColumn(base, 1), 1).rows).toEqual(base.rows)
+    expect(setAlign(base, 1, 'right').aligns).toEqual(['', 'right'])
+  })
+
+  it('TSV 支持引号、制表符、CRLF 和字段内换行', async () => {
+    const { parseTsv, toTsv } = await loadTable()
+    const rows = [['甲', '乙'], ['含\t制表', '跨\n行']]
+    expect(parseTsv('甲\t乙\r\n"含\t制表"\t"跨\n行"\r\n')).toEqual(rows)
+    expect(parseTsv(toTsv(rows))).toEqual(rows)
+  })
+
+  it('网格粘贴自动扩展行列且不修改原模型', async () => {
+    const { parseTable, pasteGrid } = await loadTable()
+    const base = parseTable('| A | B |\n| --- | --- |\n| 1 | 2 |')
+    const next = pasteGrid(base, 1, 1, [['x', 'y', 'z'], ['q', 'w', 'e']])
+    expect(next.rows).toEqual([['A', 'B', '', ''], ['1', 'x', 'y', 'z'], ['', 'q', 'w', 'e']])
+    expect(next.aligns).toEqual(['', '', '', ''])
+    expect(base.rows).toEqual([['A', 'B'], ['1', '2']])
+  })
+})

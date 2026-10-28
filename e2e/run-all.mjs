@@ -2,7 +2,7 @@
 // 前提：npm run dev 已在运行（默认 http://localhost:5173/）
 import { launch } from './helpers.mjs'
 
-const specs = ['annotate', 'cards', 'file-sync', 'workspace', 'ai-mock', 'layout']
+const specs = ['annotate', 'cards', 'file-sync', 'workspace', 'ai-mock', 'layout', 'local-file', 'editing']
 const filter = process.argv[2]
 let failed = 0
 

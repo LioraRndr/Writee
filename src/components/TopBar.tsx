@@ -2,13 +2,19 @@ import { MOD, SHIFT } from '../core/platform'
 import { useDoc } from '../store/docStore'
 import { useUI } from '../store/uiStore'
 import { closeDoc, downloadCurrent, grantWrite, newDocument, openDialog, saveAs, writeNow } from '../store/session'
-import { fsaSupported } from '../core/fileAccess'
+import { copyText, fsaSupported } from '../core/fileAccess'
+import { isLocalFile, localFileAction, localFilePath, localSystemSupported } from '../core/localFile'
+import type { LocalFileHandle } from '../core/types'
 import { Menu } from './Menu'
+import { useMediaQuery } from './hooks'
 import {
   IconCards,
   IconCopy,
   IconFile,
+  IconFolder,
   IconLayers,
+  IconLink,
+  IconMore,
   IconNote,
   IconPen,
   IconRail,
@@ -64,6 +70,22 @@ export function FileStatus() {
   }
 }
 
+async function runFileAction(handle: LocalFileHandle, action: 'copy' | 'open' | 'reveal') {
+  try {
+    if (action === 'copy') {
+      const filePath = await localFilePath(handle)
+      if (!(await copyText(filePath))) throw new Error('剪贴板不可用')
+      useUI.getState().toast('已复制文件路径')
+      return
+    }
+    const filePath = action === 'open' ? await localFilePath(handle) : undefined
+    await localFileAction(handle, action, filePath)
+    useUI.getState().toast(action === 'open' ? '已交给系统默认程序' : '已在文件夹中显示')
+  } catch (error) {
+    useUI.getState().toast('操作失败：' + (error instanceof Error ? error.message : String(error)), { tone: 'error', ms: 6000 })
+  }
+}
+
 export function TopBar() {
   const meta = useDoc((s) => s.meta)
   const mode = useUI((s) => s.mode)
@@ -73,15 +95,34 @@ export function TopBar() {
   const notes = useDoc((s) => s.data.notes.length)
   const canUndo = useDoc((s) => s.past.length > 0)
   const setSettings = useUI((s) => s.setSettings)
+  const local = meta?.handle && isLocalFile(meta.handle) && localSystemSupported ? meta.handle : null
+  const compact = useMediaQuery('(max-width: 680px)')
+  const overlay = useMediaQuery('(max-width: 900px)')
+  const toggleOutline = () => {
+    const open = !settings.outlineOpen
+    setSettings({ outlineOpen: open, ...(overlay && open ? { railOpen: false } : {}) })
+  }
+  const toggleRailVisible = () => {
+    const open = !settings.railOpen
+    setSettings({ railOpen: open, ...(overlay && open ? { outlineOpen: false } : {}) })
+  }
+  const selectRail = (next: 'notes' | 'structure') => {
+    if (rail === next && settings.railOpen) {
+      setSettings({ railOpen: false })
+      return
+    }
+    useUI.setState({ rail: next })
+    setSettings({ railOpen: true, ...(overlay ? { outlineOpen: false } : {}) })
+  }
 
   return (
-    <header className="topbar">
+    <header className={'topbar' + (compact ? ' is-compact' : '')}>
       <div className="topbar-left">
         {meta && (
         <button
           className={'icon-btn' + (settings.outlineOpen ? ' is-on' : '')}
           title={`大纲（${MOD}\\）`}
-          onClick={() => setSettings({ outlineOpen: !settings.outlineOpen })}
+          onClick={toggleOutline}
         >
           <IconSidebar size={17} />
         </button>
@@ -108,7 +149,30 @@ export function TopBar() {
                 hint: MOD + 'S',
                 onSelect: () => void (meta.handle ? writeNow() : saveAs()),
               },
+              { label: '另存为…', onSelect: () => void saveAs() },
               { label: '下载副本（.md）', onSelect: downloadCurrent },
+              { divider: true, label: '' },
+              {
+                label: '复制文件路径',
+                icon: <IconCopy size={14} />,
+                hint: local ? undefined : '本机入口',
+                disabled: !local,
+                onSelect: () => void runFileAction(local!, 'copy'),
+              },
+              {
+                label: '在文件夹中显示',
+                icon: <IconFolder size={14} />,
+                hint: local ? undefined : '本机入口',
+                disabled: !local,
+                onSelect: () => void runFileAction(local!, 'reveal'),
+              },
+              {
+                label: '用系统默认方式打开',
+                icon: <IconLink size={14} />,
+                hint: local ? undefined : '本机入口',
+                disabled: !local,
+                onSelect: () => void runFileAction(local!, 'open'),
+              },
               { divider: true, label: '' },
               { label: '关闭，返回文档列表', onSelect: closeDoc },
             ]}
@@ -138,29 +202,17 @@ export function TopBar() {
           <div className="seg small">
             <button
               className={rail === 'notes' && settings.railOpen ? 'is-on' : ''}
-              onClick={() => {
-                if (rail === 'notes' && settings.railOpen) setSettings({ railOpen: false })
-                else {
-                  useUI.setState({ rail: 'notes' })
-                  setSettings({ railOpen: true })
-                }
-              }}
+              onClick={() => selectRail('notes')}
               title="注释侧栏"
             >
-              <IconNote size={14} /> 注释{notes ? <span className="count">{notes}</span> : null}
+              <IconNote size={14} /> <span className="topbar-action-label">注释</span>{notes ? <span className="count">{notes}</span> : null}
             </button>
             <button
               className={rail === 'structure' && settings.railOpen ? 'is-on' : ''}
-              onClick={() => {
-                if (rail === 'structure' && settings.railOpen) setSettings({ railOpen: false })
-                else {
-                  useUI.setState({ rail: 'structure' })
-                  setSettings({ railOpen: true })
-                }
-              }}
+              onClick={() => selectRail('structure')}
               title="结构分析侧栏"
             >
-              <IconLayers size={14} /> 结构
+              <IconLayers size={14} /> <span className="topbar-action-label">结构</span>
             </button>
           </div>
           <button
@@ -169,21 +221,39 @@ export function TopBar() {
             onClick={() => useUI.setState({ dialog: 'copy' })}
             title={`把注释整理成提示词，复制给 AI（${MOD}${SHIFT}C）`}
           >
-            <IconCopy size={14} /> 复制注释{selected ? ` (${selected})` : ''}
+            <IconCopy size={14} /> <span className="topbar-action-label">复制注释</span>{selected ? ` (${selected})` : ''}
           </button>
-          <button className="icon-btn" title="AI 设置" onClick={() => useUI.setState({ dialog: 'ai' })}>
-            <IconSpark size={16} />
-          </button>
-          <button className="icon-btn" title="外观与偏好" onClick={() => useUI.setState({ dialog: 'settings' })}>
-            <IconSettings size={16} />
-          </button>
-          <button
-            className={'icon-btn' + (settings.railOpen ? ' is-on' : '')}
-            title="显示/隐藏侧栏"
-            onClick={() => setSettings({ railOpen: !settings.railOpen })}
-          >
-            <IconRail size={17} />
-          </button>
+          {compact ? (
+            <Menu
+              title="更多"
+              trigger={<IconMore size={16} />}
+              items={[
+                { label: 'AI 设置', icon: <IconSpark size={14} />, onSelect: () => useUI.setState({ dialog: 'ai' }) },
+                { label: '外观与偏好', icon: <IconSettings size={14} />, onSelect: () => useUI.setState({ dialog: 'settings' }) },
+                {
+                  label: settings.railOpen ? '隐藏侧栏' : '显示侧栏',
+                  icon: <IconRail size={14} />,
+                  onSelect: toggleRailVisible,
+                },
+              ]}
+            />
+          ) : (
+            <>
+              <button className="icon-btn" title="AI 设置" onClick={() => useUI.setState({ dialog: 'ai' })}>
+                <IconSpark size={16} />
+              </button>
+              <button className="icon-btn" title="外观与偏好" onClick={() => useUI.setState({ dialog: 'settings' })}>
+                <IconSettings size={16} />
+              </button>
+              <button
+                className={'icon-btn' + (settings.railOpen ? ' is-on' : '')}
+                title="显示/隐藏侧栏"
+                onClick={toggleRailVisible}
+              >
+                <IconRail size={17} />
+              </button>
+            </>
+          )}
         </div>
       )}
     </header>

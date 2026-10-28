@@ -2,7 +2,11 @@ import { syntaxTree } from '@codemirror/language'
 import { EditorState, Facet, StateEffect, StateField, type Range, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { SyntaxNode } from '@lezer/common'
-import { renderInline } from './inline'
+import { findMathRanges, type MathRange, type TextRange } from '../core/math'
+import { findWikiLinks, linkKind, type WikiLink } from '../core/links'
+import { MathWidget } from './MathWidget'
+import { LinkWidget } from './LinkWidget'
+import { TableWidget } from './TableWidget'
 
 /** 是否隐藏 Markdown 标记（实时预览）；关闭时为“源码模式”，仍保留排版样式 */
 export const hideMarks = Facet.define<boolean, boolean>({ combine: (v) => (v.length ? v[v.length - 1] : true) })
@@ -101,65 +105,6 @@ class ImageWidget extends WidgetType {
   }
 }
 
-class TableWidget extends WidgetType {
-  constructor(readonly source: string, readonly from: number) {
-    super()
-  }
-  eq(o: TableWidget) {
-    return o.source === this.source && o.from === this.from
-  }
-  toDOM(view: EditorView) {
-    const wrap = document.createElement('div')
-    wrap.className = 'cm-md-table'
-    const lines = this.source.split('\n').filter((l) => l.trim())
-    const split = (l: string) => {
-      let s = l.trim()
-      if (s.startsWith('|')) s = s.slice(1)
-      if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1)
-      return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
-    }
-    const head = split(lines[0] ?? '')
-    const aligns = split(lines[1] ?? '').map((c) =>
-      /^:-+:$/.test(c) ? 'center' : /^-+:$/.test(c) ? 'right' : /^:-+$/.test(c) ? 'left' : '',
-    )
-    const table = document.createElement('table')
-    const thead = document.createElement('thead')
-    const tr = document.createElement('tr')
-    head.forEach((c, i) => {
-      const th = document.createElement('th')
-      th.innerHTML = renderInline(c)
-      if (aligns[i]) th.style.textAlign = aligns[i]
-      tr.appendChild(th)
-    })
-    thead.appendChild(tr)
-    table.appendChild(thead)
-    const tbody = document.createElement('tbody')
-    for (const l of lines.slice(2)) {
-      const row = document.createElement('tr')
-      split(l).forEach((c, i) => {
-        const td = document.createElement('td')
-        td.innerHTML = renderInline(c)
-        if (aligns[i]) td.style.textAlign = aligns[i]
-        row.appendChild(td)
-      })
-      tbody.appendChild(row)
-    }
-    table.appendChild(tbody)
-    wrap.appendChild(table)
-    wrap.title = '点击编辑表格源码'
-    wrap.addEventListener('mousedown', (e) => {
-      if ((e.target as HTMLElement).closest('[data-tag-badge]')) return
-      e.preventDefault()
-      view.focus()
-      view.dispatch({ selection: { anchor: this.from } })
-    })
-    return wrap
-  }
-  ignoreEvent() {
-    return true
-  }
-}
-
 function touches(state: EditorState, focused: boolean, from: number, to: number) {
   if (!focused) return false
   for (const r of state.selection.ranges) if (r.from <= to && r.to >= from) return true
@@ -178,12 +123,57 @@ function listDepth(node: SyntaxNode) {
   return Math.max(0, d - 1)
 }
 
+const mathCache = new WeakMap<EditorState, MathRange[]>()
+
+function mathRanges(state: EditorState) {
+  const cached = mathCache.get(state)
+  if (cached) return cached
+  const excluded: TextRange[] = []
+  syntaxTree(state).iterate({
+    enter: (ref) => {
+      if (!['FencedCode', 'CodeBlock', 'InlineCode', 'HTMLBlock', 'HTMLTag', 'Comment', 'Table', 'Image', 'URL'].includes(ref.name)) return
+      excluded.push({ from: ref.from, to: ref.to })
+      return false
+    },
+  })
+  const ranges = findMathRanges(state.doc.toString(), excluded)
+  mathCache.set(state, ranges)
+  return ranges
+}
+
+const wikiCache = new WeakMap<EditorState, WikiLink[]>()
+
+function wikiRanges(state: EditorState) {
+  const cached = wikiCache.get(state)
+  if (cached) return cached
+  const excluded: TextRange[] = [...mathRanges(state)]
+  syntaxTree(state).iterate({
+    enter: (ref) => {
+      if (!['FencedCode', 'CodeBlock', 'InlineCode', 'HTMLBlock', 'HTMLTag', 'Comment', 'Table', 'Image'].includes(ref.name)) return
+      excluded.push({ from: ref.from, to: ref.to })
+      return false
+    },
+  })
+  const ranges = findWikiLinks(state.doc.toString(), excluded)
+  wikiCache.set(state, ranges)
+  return ranges
+}
+
+function isMathBlock(state: EditorState, range: MathRange) {
+  if (!range.display) return false
+  const first = state.doc.lineAt(range.from)
+  const last = state.doc.lineAt(range.to)
+  return !first.text.slice(0, range.from - first.from).trim() && !last.text.slice(range.to - last.from).trim()
+}
+
 function buildInline(view: EditorView): DecorationSet {
   const state = view.state
   const hide = state.facet(hideMarks)
   const focused = view.hasFocus
   const decos: Range<Decoration>[] = []
   const doc = state.doc
+  const maths = mathRanges(state)
+  const wikis = wikiRanges(state)
   const lineDecoDone = new Set<number>()
   const addLine = (pos: number, cls: string, attrs?: Record<string, string>) => {
     const line = doc.lineAt(pos)
@@ -235,6 +225,7 @@ function buildInline(view: EditorView): DecorationSet {
           addLine(ref.from, 'cm-h cm-h' + name.slice(-1))
           return
         }
+        if (maths.some((m) => ref.from >= m.from && ref.to <= m.to) || wikis.some((w) => ref.from >= w.from && ref.to <= w.to)) return false
         switch (name) {
           case 'Emphasis':
           case 'StrongEmphasis':
@@ -269,8 +260,12 @@ function buildInline(view: EditorView): DecorationSet {
             if (marks.length >= 2) {
               const textFrom = marks[0].to
               const textTo = marks[1].from
+              const safe = linkKind(url) !== 'unsafe'
               decos.push(
-                Decoration.mark({ class: 'cm-md-link', attributes: { 'data-href': url, title: url } }).range(textFrom, textTo),
+                Decoration.mark({
+                  class: 'cm-md-link',
+                  attributes: safe ? { 'data-href': url, title: url + '（Ctrl/Cmd+点击打开）' } : { title: '不支持此链接协议' },
+                }).range(textFrom, textTo),
               )
               if (hide && !active) {
                 hideRange(marks[0].from, marks[0].to)
@@ -285,7 +280,14 @@ function buildInline(view: EditorView): DecorationSet {
           case 'Autolink':
           case 'URL': {
             if (node.parent?.name === 'Link' || node.parent?.name === 'Image') return
-            mark(ref.from, ref.to, 'cm-md-link')
+            const urlNode = node.getChild('URL')
+            const url = urlNode ? doc.sliceString(urlNode.from, urlNode.to) : doc.sliceString(ref.from, ref.to).replace(/^<|>$/g, '')
+            if (linkKind(url) !== 'unsafe') {
+              decos.push(
+                Decoration.mark({ class: 'cm-md-link', attributes: { 'data-href': url, title: url + '（Ctrl/Cmd+点击打开）' } }).range(ref.from, ref.to),
+              )
+            } else mark(ref.from, ref.to, 'cm-md-link')
+            if (name === 'Autolink') return false
             return
           }
           case 'Image': {
@@ -387,6 +389,24 @@ function buildInline(view: EditorView): DecorationSet {
       },
     })
   }
+  for (const { from, to } of view.visibleRanges) {
+    if (hide) {
+      for (const m of maths) {
+        if (m.to < from || m.from > to || isMathBlock(state, m) || touches(state, focused, m.from, m.to)) continue
+        decos.push(Decoration.replace({ widget: new MathWidget(m.source, m.display, false, m.from) }).range(m.from, m.to))
+      }
+    }
+    for (const w of wikis) {
+      if (w.to < from || w.from > to) continue
+      if (hide && !touches(state, focused, w.from, w.to)) {
+        decos.push(Decoration.replace({ widget: new LinkWidget(w.label, w.target, w.from) }).range(w.from, w.to))
+      } else {
+        decos.push(
+          Decoration.mark({ class: 'cm-md-link cm-md-wiki-source', attributes: { 'data-href': w.target, title: w.target } }).range(w.from, w.to),
+        )
+      }
+    }
+  }
   return Decoration.set(decos, true)
 }
 
@@ -463,7 +483,36 @@ const tableField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
-/** 语法树逐步解析完成后刷新表格 */
+function buildMathBlocks(state: EditorState): DecorationSet {
+  if (!state.facet(hideMarks)) return Decoration.none
+  const focused = state.field(focusedField)
+  const decos: Range<Decoration>[] = []
+  for (const m of mathRanges(state)) {
+    if (!isMathBlock(state, m) || touches(state, focused, m.from, m.to)) continue
+    const from = state.doc.lineAt(m.from).from
+    const to = state.doc.lineAt(m.to).to
+    decos.push(Decoration.replace({ widget: new MathWidget(m.source, true, true, m.from), block: true }).range(from, to))
+  }
+  return Decoration.set(decos, true)
+}
+
+const mathBlockField = StateField.define<DecorationSet>({
+  create: (s) => buildMathBlocks(s),
+  update(v, tr) {
+    if (
+      tr.docChanged ||
+      tr.selection ||
+      tr.effects.some((e) => e.is(setFocused)) ||
+      syntaxTree(tr.startState) !== syntaxTree(tr.state) ||
+      tr.startState.facet(hideMarks) !== tr.state.facet(hideMarks)
+    )
+      return buildMathBlocks(tr.state)
+    return v
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})
+
+/** 语法树逐步解析完成后刷新表格与公式 */
 const treeWatcher = ViewPlugin.fromClass(
   class {
     update(u: ViewUpdate) {
@@ -480,6 +529,7 @@ export function livePreview(): Extension {
     inlinePlugin,
     focusedField,
     tableField,
+    mathBlockField,
     treeWatcher,
     focusEffect.of((_s, focusing) => setFocused.of(focusing)),
   ]

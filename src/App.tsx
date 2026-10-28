@@ -75,7 +75,8 @@ export default function App() {
       if (mod && e.key === '\\') {
         e.preventDefault()
         const s = useUI.getState().settings
-        useUI.getState().setSettings({ outlineOpen: !s.outlineOpen })
+        const open = !s.outlineOpen
+        useUI.getState().setSettings({ outlineOpen: open, ...(open && window.matchMedia('(max-width: 900px)').matches ? { railOpen: false } : {}) })
         return
       }
       if (mod && e.altKey && (k === 'm' || e.code === 'KeyM')) {

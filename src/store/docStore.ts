@@ -26,12 +26,23 @@ export interface DocMeta {
   created: number
 }
 
-interface HistoryEntry {
+export interface HistoryEntry {
   data: DocData
   group: string | null
   time: number
   /** 该组第一次变更的时间：连续输入最多合并 GROUP_MAX 毫秒 */
   start: number
+}
+
+/** 后台标签页保存的文档快照（含撤销历史） */
+export interface DocSnapshot {
+  meta: DocMeta
+  data: DocData
+  past: HistoryEntry[]
+  future: HistoryEntry[]
+  fileStatus: FileStatus
+  fileError: string | null
+  lastSaved: number | null
 }
 
 export interface DocState {
@@ -47,6 +58,8 @@ export interface DocState {
   lastSaved: number | null
 
   open(meta: DocMeta, data: DocData): void
+  /** 切回后台标签页：恢复文本、注释与撤销历史 */
+  restore(snapshot: DocSnapshot): void
   close(): void
   setFileStatus(s: FileStatus, err?: string | null): void
   markSaved(time: number): void
@@ -172,6 +185,16 @@ export const useDoc = create<DocState>()((set, get) => {
         future: [],
         fileError: null,
         fileStatus: meta.handle ? 'saved' : 'memory',
+      })
+    },
+
+    restore(snapshot) {
+      const r = rebuild(snapshot.data)
+      set({
+        ...snapshot,
+        ...r,
+        rev: ++rev,
+        event: { rev, origin: 'load', textChanged: true, touched: null, map: null },
       })
     },
 

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
 import { useDoc } from '../store/docStore'
 import { useUI } from '../store/uiStore'
-import { openDocumentLink } from '../store/session'
+import { clearPendingScroll, openDocumentLink, pendingScrollFor, useTabs } from '../store/session'
 import { useSel } from '../editor/setup'
 import { posBox, registry } from '../editor/registry'
 import { tagInfo } from '../core/derive'
@@ -14,6 +14,7 @@ import { NotesRail } from './rail/NotesRail'
 import { StructureRail } from './rail/StructureRail'
 import { TagPicker } from './rail/TagPicker'
 import { Outline } from './Outline'
+import { TabStrip } from './TabStrip'
 import { Resizer } from './Resizer'
 import { Menu } from './Menu'
 import { useMediaQuery } from './hooks'
@@ -316,6 +317,25 @@ function TagPopover() {
   )
 }
 
+/** 标签页放在左侧时，左侧栏顶部切换“大纲 / 标签页” */
+function LeftSwitch() {
+  const panel = useUI((s) => s.settings.leftPanel)
+  const count = useTabs((s) => s.tabs.length)
+  const set = (leftPanel: 'outline' | 'tabs') => useUI.getState().setSettings({ leftPanel })
+  return (
+    <div className="left-switch">
+      <div className="seg small" role="tablist">
+        <button role="tab" aria-selected={panel === 'outline'} className={panel === 'outline' ? 'is-on' : ''} onClick={() => set('outline')}>
+          大纲
+        </button>
+        <button role="tab" aria-selected={panel === 'tabs'} className={panel === 'tabs' ? 'is-on' : ''} onClick={() => set('tabs')}>
+          标签页{count ? <span className="count">{count}</span> : null}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function Workspace() {
   const mode = useUI((s) => s.mode)
   const rail = useUI((s) => s.rail)
@@ -324,6 +344,7 @@ export function Workspace() {
   const scroller = useRef<HTMLDivElement>(null)
   const page = useRef<HTMLDivElement>(null)
   const overlay = useMediaQuery('(max-width: 900px)')
+  const leftTabs = settings.tabsPosition === 'left' && settings.leftPanel === 'tabs'
 
   useEffect(() => {
     if (overlay) useUI.getState().setSettings({ outlineOpen: false, railOpen: false })
@@ -334,7 +355,22 @@ export function Workspace() {
 
   useLayoutEffect(() => {
     registry.setPage(page.current, scroller.current)
-    return () => registry.setPage(null, null)
+    // 切回后台标签页：等编辑器测量完再恢复滚动位置
+    const id = useDoc.getState().meta?.id ?? ''
+    const top = pendingScrollFor(id)
+    let raf = 0
+    if (top !== null) {
+      raf = requestAnimationFrame(() => {
+        raf = requestAnimationFrame(() => {
+          if (scroller.current) scroller.current.scrollTop = top
+          clearPendingScroll(id)
+        })
+      })
+    }
+    return () => {
+      cancelAnimationFrame(raf)
+      registry.setPage(null, null)
+    }
   }, [])
 
   useEffect(() => {
@@ -392,7 +428,10 @@ export function Workspace() {
   return (
     <div className={'workspace' + (linkNote ? ' is-linking' : '')}>
       <div className={'outline-wrap' + (settings.outlineOpen ? '' : ' is-closed')} aria-hidden={!settings.outlineOpen}>
-        <Outline />
+        {settings.tabsPosition === 'left' && <LeftSwitch />}
+        <div className="left-panel" key={leftTabs ? 'tabs' : 'outline'}>
+          {leftTabs ? <TabStrip vertical /> : <Outline />}
+        </div>
         <Resizer k="outlineWidth" dir={1} className="is-outline" />
       </div>
       <div className="scroller" ref={scroller}>

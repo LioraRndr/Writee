@@ -174,7 +174,7 @@ export function TopBar() {
                 onSelect: () => void runFileAction(local!, 'open'),
               },
               { divider: true, label: '' },
-              { label: '关闭，返回文档列表', onSelect: closeDoc },
+              { label: '关闭标签页', onSelect: closeDoc },
             ]}
           />
         )}

@@ -9,7 +9,8 @@ import { useUI } from '../store/uiStore'
 import { minimalChange } from '../core/mapping'
 import { tagInfo } from '../core/derive'
 import { primaryCat, tagLabel } from '../analysis/taxonomy'
-import { hideMarks, livePreview } from './livePreview'
+import { hideMarks, livePreview, renderedTableAt } from './livePreview'
+import { focusTableAt } from './TableWidget'
 import { overlayField, setOverlay, type OverlaySpec } from './overlays'
 import { registry } from './registry'
 
@@ -171,12 +172,13 @@ export function createEditor(opts: EditorOpts): EditorHandle {
     const mc = minimalChange(cur, want)
     if (!mc) return
     const focused = view.hasFocus
-    view.dispatch({
-      changes: mc,
-      annotations: [syncAnnot.of(true), Transaction.addToHistory.of(false)],
-      selection: focused && fromHistory ? { anchor: mc.from + mc.insert.length } : undefined,
-      scrollIntoView: focused && fromHistory,
-    })
+    view.dispatch({ changes: mc, annotations: [syncAnnot.of(true), Transaction.addToHistory.of(false)] })
+    if (!focused || !fromHistory) return
+    // 撤销 / 重做：光标回到变化处；落在渲染表格里时选中表格单元格，不把表格切回源码
+    const anchor = mc.from + mc.insert.length
+    const table = renderedTableAt(view.state, anchor)
+    if (table && focusTableAt(view, table.from)) return
+    view.dispatch({ selection: { anchor }, scrollIntoView: true, annotations: syncAnnot.of(true) })
   }
 
   let overlayQueued = false

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { useDoc } from './docStore'
+import { useDoc, type DocSnapshot, type FileStatus } from './docStore'
 import { useUI } from './uiStore'
 import type { DocArchive, DocData, DocIndexEntry, FileHandle, FileLocation } from '../core/types'
 import { isLocalFile, launchedFile, localFileAction, localSystemSupported } from '../core/localFile'
@@ -19,6 +19,7 @@ import {
   writeHandle,
 } from '../core/fileAccess'
 import { uid } from '../core/uid'
+import { registry } from '../editor/registry'
 import { SAMPLE_DOC, SAMPLE_NAME } from '../sample'
 
 interface Conflict {
@@ -34,12 +35,259 @@ interface SessionState {
 
 export const useSession = create<SessionState>()(() => ({ recent: [], conflict: null, loading: false }))
 
+interface Sess {
+  id: string
+  diskText: string
+  diskModified: number | undefined
+  created: number
+  location?: FileLocation
+}
+
 /** 当前文档与磁盘同步的状态 */
-let sess: { id: string; diskText: string; diskModified: number | undefined; created: number; location?: FileLocation } | null = null
+let sess: Sess | null = null
 
 export function currentLocation() {
   return sess?.location
 }
+
+// ---------- 标签页 ----------
+
+export interface TabInfo {
+  id: string
+  name: string
+  /** 后台标签页最后的文件状态；当前标签页实时读取 useDoc */
+  status?: FileStatus
+}
+
+interface TabsState {
+  tabs: TabInfo[]
+  /** 当前显示的标签页；null 表示文档列表（首页） */
+  active: string | null
+}
+
+/** 后台标签页：内存里保留文本、撤销历史与磁盘基线，切回时无需重新读取 */
+interface Parked {
+  doc: DocSnapshot
+  sess: Sess
+  conflict: Conflict | null
+  ui: { mode: 'editor' | 'cards'; collapsed: string[] }
+  scrollTop: number
+}
+
+const TABS_KEY = 'writee.tabs'
+
+function loadTabs(): TabsState {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TABS_KEY) ?? 'null')
+    if (Array.isArray(raw?.tabs)) {
+      const tabs = raw.tabs
+        .filter((t: unknown): t is TabInfo => typeof (t as TabInfo)?.id === 'string')
+        .map((t: TabInfo) => ({ id: t.id, name: String(t.name ?? '') }))
+      // 重新打开应用时只恢复标签页列表，点选时再载入（文件权限需要用户手势）
+      return { tabs, active: null }
+    }
+  } catch {
+    /* ignore */
+  }
+  return { tabs: [], active: null }
+}
+
+export const useTabs = create<TabsState>()(() => loadTabs())
+
+useTabs.subscribe((s, p) => {
+  if (s.tabs === p.tabs) return
+  try {
+    localStorage.setItem(TABS_KEY, JSON.stringify({ tabs: s.tabs.map((t) => ({ id: t.id, name: t.name })) }))
+  } catch {
+    /* ignore */
+  }
+})
+
+const parked = new Map<string, Parked>()
+
+/** 切换标签页后由 Workspace 恢复的滚动位置（按文档 id，开发模式下组件会挂载两次，读取后不立即清除） */
+let pendingScroll: { id: string; top: number } | null = null
+export function pendingScrollFor(id: string) {
+  return pendingScroll?.id === id ? pendingScroll.top : null
+}
+export function clearPendingScroll(id: string) {
+  if (pendingScroll?.id === id) pendingScroll = null
+}
+
+/** 打开、切换、关闭依次执行，避免快速点击时两份文档交错载入 */
+let queue: Promise<unknown> = Promise.resolve()
+function serial<A extends unknown[], R>(fn: (...args: A) => Promise<R>) {
+  return (...args: A): Promise<R> => {
+    const run = queue.then(() => fn(...args))
+    queue = run.catch(() => undefined)
+    return run
+  }
+}
+
+/** 恢复期间不触发自动写回 / 存档调度 */
+let quiet = false
+
+function upsertTab(id: string, name: string) {
+  const { tabs, active } = useTabs.getState()
+  const i = tabs.findIndex((t) => t.id === id)
+  let next: TabInfo[]
+  if (i >= 0) next = tabs.map((t) => (t.id === id ? { ...t, name, status: undefined } : t))
+  else {
+    // 新标签页插在当前标签页之后
+    const at = active ? tabs.findIndex((t) => t.id === active) + 1 : tabs.length
+    next = tabs.slice()
+    next.splice(at > 0 ? at : tabs.length, 0, { id, name })
+  }
+  useTabs.setState({ tabs: next, active: id })
+}
+
+function setTabStatus(id: string, status: FileStatus | undefined) {
+  const { tabs } = useTabs.getState()
+  if (!tabs.some((t) => t.id === id && t.status !== status)) return
+  useTabs.setState({ tabs: tabs.map((t) => (t.id === id ? { ...t, status } : t)) })
+}
+
+/** 把当前文档停放到后台：先写回文件与存档，再保留内存快照 */
+async function park() {
+  const doc = useDoc.getState()
+  if (!doc.meta || !sess) return
+  clearTimeout(writeTimer)
+  if (doc.meta.handle && doc.fileStatus !== 'conflict' && doc.data.text !== sess.diskText) await writeNow()
+  await persistNow()
+  const cur = useDoc.getState()
+  if (!cur.meta || !sess || sess.id !== cur.meta.id) return
+  const ui = useUI.getState()
+  parked.set(cur.meta.id, {
+    doc: {
+      meta: cur.meta,
+      data: cur.data,
+      past: cur.past,
+      future: cur.future,
+      fileStatus: cur.fileStatus,
+      fileError: cur.fileError,
+      lastSaved: cur.lastSaved,
+    },
+    sess,
+    conflict: useSession.getState().conflict,
+    ui: { mode: ui.mode, collapsed: ui.collapsed },
+    scrollTop: registry.scroller()?.scrollTop ?? 0,
+  })
+  setTabStatus(cur.meta.id, cur.fileStatus)
+}
+
+function unpark(p: Parked) {
+  const id = p.doc.meta.id
+  parked.delete(id)
+  clearTimeout(writeTimer)
+  sess = p.sess
+  pendingScroll = { id, top: p.scrollTop }
+  useSession.setState({ conflict: p.conflict })
+  restoreUI(p.ui)
+  quiet = true
+  try {
+    useDoc.getState().restore(p.doc)
+  } finally {
+    quiet = false
+  }
+  const d = useDoc.getState()
+  if (d.meta?.handle && d.fileStatus !== 'conflict' && d.data.text !== p.sess.diskText) scheduleWrite(300)
+  // 在后台期间文件可能被外部修改
+  void checkDisk()
+}
+
+/**
+ * 显示文档 id：已在前台则只检查磁盘；在后台则切回；否则停放当前文档后用 install 载入新文档。
+ * 载入后该文档成为当前标签页（没有标签页时新建）。
+ */
+async function present(id: string, install: () => Promise<void>) {
+  if (useDoc.getState().meta?.id === id && sess?.id === id) {
+    upsertTab(id, useDoc.getState().meta!.name)
+    void checkDisk()
+    return
+  }
+  await park()
+  const p = parked.get(id)
+  if (p) unpark(p)
+  else await install()
+  const meta = useDoc.getState().meta
+  if (meta) upsertTab(meta.id, meta.name)
+}
+
+/** 关闭当前文档但保留它的后台快照（用于“+”回到文档列表） */
+async function parkAndHome() {
+  await park()
+  sess = null
+  clearTimeout(writeTimer)
+  useSession.setState({ conflict: null })
+  useDoc.getState().close()
+  useTabs.setState({ active: null })
+  void refreshRecent()
+}
+
+export const goHome = serial(parkAndHome)
+
+export const activateTab = serial(async (id: string) => {
+  if (useDoc.getState().meta?.id === id) return
+  const p = parked.get(id)
+  if (p) {
+    await park()
+    unpark(p)
+    useTabs.setState({ active: id })
+    return
+  }
+  await openRecentImpl(id)
+})
+
+async function closeTabImpl(id: string) {
+  const { tabs } = useTabs.getState()
+  const index = tabs.findIndex((t) => t.id === id)
+  const rest = tabs.filter((t) => t.id !== id)
+  if (useDoc.getState().meta?.id === id) {
+    clearTimeout(writeTimer)
+    const doc = useDoc.getState()
+    if (sess && doc.meta?.handle && doc.fileStatus !== 'conflict' && doc.data.text !== sess.diskText) await writeNow()
+    await persistNow()
+    sess = null
+    useSession.setState({ conflict: null })
+    useDoc.getState().close()
+    useTabs.setState({ tabs: rest, active: null })
+    // 关闭当前标签页后切到相邻的一个；没有了就回到文档列表
+    const neighbor = rest[Math.min(index, rest.length - 1)]
+    if (neighbor) {
+      const p = parked.get(neighbor.id)
+      if (p) {
+        unpark(p)
+        useTabs.setState({ active: neighbor.id })
+      } else await openRecentImpl(neighbor.id)
+    } else void refreshRecent()
+    return
+  }
+  parked.delete(id)
+  useTabs.setState({ tabs: rest })
+}
+
+export const closeTab = serial(closeTabImpl)
+
+export const closeOtherTabs = serial(async (keep: string) => {
+  for (const t of useTabs.getState().tabs) if (t.id !== keep) await closeTabImpl(t.id)
+})
+
+export const closeTabsToRight = serial(async (id: string) => {
+  const tabs = useTabs.getState().tabs
+  const i = tabs.findIndex((t) => t.id === id)
+  for (const t of tabs.slice(i + 1)) await closeTabImpl(t.id)
+})
+
+export function moveTab(id: string, to: number) {
+  const tabs = useTabs.getState().tabs.slice()
+  const from = tabs.findIndex((t) => t.id === id)
+  if (from < 0) return
+  const [tab] = tabs.splice(from, 1)
+  tabs.splice(Math.max(0, Math.min(tabs.length, to > from ? to - 1 : to)), 0, tab)
+  useTabs.setState({ tabs })
+}
+
+// ---------- 工作目录 ----------
 
 /** 授权后把仍能识别的旧存档迁移到稳定路径，不靠同名猜测。 */
 export async function registerWorkspace(handle: FileSystemDirectoryHandle) {
@@ -58,7 +306,12 @@ export async function registerWorkspace(handle: FileSystemDirectoryHandle) {
     if (sess?.id === a.id) {
       sess.location = location
       await persistNow()
-    } else await saveArchive({ ...a, location })
+    } else {
+      // 后台标签页切回时会按自己的会话写存档，同步更新，免得把新路径覆盖掉
+      const p = parked.get(a.id)
+      if (p) p.sess.location = location
+      await saveArchive({ ...a, location })
+    }
   }
   await refreshRecent()
   return root
@@ -80,9 +333,10 @@ export async function relinkCurrent(handle: FileSystemFileHandle) {
   if (!archive || sess?.id !== id) return
   useUI.setState({ dialog: null })
   await openArchiveData(archive, id, handle.name, handle, disk.text, disk.modified, locations[0])
+  upsertTab(id, handle.name)
 }
 
-async function sessionHandle(current: NonNullable<typeof sess>, fallback: FileHandle) {
+async function sessionHandle(current: Sess, fallback: FileHandle) {
   const handle = current.location ? await handleAtLocation(current.location) : fallback
   const meta = useDoc.getState().meta
   if (sess === current && meta?.id === current.id && meta.handle !== handle) {
@@ -97,10 +351,10 @@ export async function refreshRecent() {
   useSession.setState({ recent: await loadIndex() })
 }
 
-function restoreUI(a: DocArchive | undefined) {
+function restoreUI(ui: DocArchive['ui'] | undefined) {
   useUI.setState({
-    mode: a?.ui.mode ?? 'editor',
-    collapsed: a?.ui.collapsed ?? [],
+    mode: ui?.mode ?? 'editor',
+    collapsed: ui?.collapsed ?? [],
     activeNote: null,
     hoverNote: null,
     hoverTag: null,
@@ -123,7 +377,7 @@ async function openArchiveData(
   clearTimeout(writeTimer)
   useSession.setState({ conflict: null })
   sess = { id, diskText, diskModified: modified, created: a?.created ?? Date.now(), location }
-  restoreUI(a)
+  restoreUI(a?.ui)
   const doc = useDoc.getState()
   if (!a) {
     doc.open({ id, name, handle, created: sess.created }, emptyData(diskText))
@@ -153,7 +407,7 @@ async function openArchiveData(
   await persistNow()
 }
 
-export async function openFromHandle(handle: FileHandle) {
+async function openFromHandleImpl(handle: FileHandle) {
   useSession.setState({ loading: true })
   try {
     // 尽早请求写入权限（此时仍处在用户手势中）
@@ -167,7 +421,8 @@ export async function openFromHandle(handle: FileHandle) {
     const pathArchive = await findArchiveByLocation(locations)
     const a = pathArchive ?? await findArchiveByHandle(handle)
     const location = pathArchive?.location ?? locations[0]
-    await openArchiveData(a, a?.id ?? uid('d'), handle.name, handle, text, modified, location)
+    const id = a?.id ?? uid('d')
+    await present(id, () => openArchiveData(a, id, handle.name, handle, text, modified, location))
   } catch (e) {
     useUI.getState().toast('打开失败：' + (e instanceof Error ? e.message : String(e)), { tone: 'error' })
   } finally {
@@ -175,23 +430,27 @@ export async function openFromHandle(handle: FileHandle) {
   }
 }
 
-export async function openFromFile(file: File) {
+export const openFromHandle = serial(openFromHandleImpl)
+
+export const openFromFile = serial(async (file: File) => {
   const text = normalizeNewlines(await file.text())
   const a = await findArchiveByName(file.name, text)
-  if (a) {
-    sess = { id: a.id, diskText: text, diskModified: undefined, created: a.created }
-    restoreUI(a)
-    useDoc.getState().open({ id: a.id, name: file.name, handle: null, created: a.created }, a.data)
-    if (a.data.text !== text) useDoc.getState().replaceText(text, 'disk')
-  } else {
-    const id = uid('d')
-    sess = { id, diskText: text, diskModified: undefined, created: Date.now() }
-    restoreUI(undefined)
-    useDoc.getState().open({ id, name: file.name, handle: null, created: sess.created }, emptyData(text))
-  }
-  await persistNow()
+  const id = a?.id ?? uid('d')
+  await present(id, async () => {
+    if (a) {
+      sess = { id: a.id, diskText: text, diskModified: undefined, created: a.created }
+      restoreUI(a.ui)
+      useDoc.getState().open({ id: a.id, name: file.name, handle: null, created: a.created }, a.data)
+      if (a.data.text !== text) useDoc.getState().replaceText(text, 'disk')
+    } else {
+      sess = { id, diskText: text, diskModified: undefined, created: Date.now() }
+      restoreUI(undefined)
+      useDoc.getState().open({ id, name: file.name, handle: null, created: sess.created }, emptyData(text))
+    }
+    await persistNow()
+  })
   if (!fsaSupported) useUI.getState().toast('当前浏览器不支持直接写回文件：修改会保存在存档中，可随时下载 .md', { ms: 6000 })
-}
+})
 
 export async function openDialog() {
   if (!fsaSupported) {
@@ -203,42 +462,63 @@ export async function openDialog() {
   if (h) await openFromHandle(h)
 }
 
-export async function openRecent(id: string) {
+async function openRecentImpl(id: string) {
+  if (useDoc.getState().meta?.id === id || parked.has(id)) {
+    await present(id, async () => undefined)
+    return
+  }
   await persistNow()
   const a = await loadArchive(id)
   if (!a) {
     useUI.getState().toast('找不到这份存档', { tone: 'error' })
+    useTabs.setState({ tabs: useTabs.getState().tabs.filter((t) => t.id !== id) })
     await refreshRecent()
     return
   }
-  if (a.handle || a.location) {
-    try {
-      const permissionHandle = a.location ? await locationRoot(a.location) : a.handle!
-      const ok = await requestPermission(permissionHandle, 'readwrite')
-      const handle = a.location ? await handleAtLocation(a.location) : a.handle!
-      const { text, modified } = await readHandle(handle)
-      await openArchiveData(a, a.id, handle.name, handle, text, modified, a.location)
-      if (!ok && !useSession.getState().conflict) useDoc.getState().setFileStatus('nopermission')
-      return
-    } catch {
-      useUI.getState().toast('原文件无法访问（可能已移动或删除），已打开存档中的版本', { tone: 'error', ms: 6000 })
+  await present(id, async () => {
+    if (a.handle || a.location) {
+      try {
+        const permissionHandle = a.location ? await locationRoot(a.location) : a.handle!
+        const ok = await requestPermission(permissionHandle, 'readwrite')
+        const handle = a.location ? await handleAtLocation(a.location) : a.handle!
+        const { text, modified } = await readHandle(handle)
+        await openArchiveData(a, a.id, handle.name, handle, text, modified, a.location)
+        if (!ok && !useSession.getState().conflict) useDoc.getState().setFileStatus('nopermission')
+        return
+      } catch {
+        useUI.getState().toast('原文件无法访问（可能已移动或删除），已打开存档中的版本', { tone: 'error', ms: 6000 })
+      }
     }
-  }
-  clearTimeout(writeTimer)
-  useSession.setState({ conflict: null })
-  sess = { id: a.id, diskText: a.diskText, diskModified: undefined, created: a.created, location: a.location }
-  restoreUI(a)
-  useDoc.getState().open({ id: a.id, name: a.name, handle: null, created: a.created }, a.data)
-  await persistNow()
+    clearTimeout(writeTimer)
+    useSession.setState({ conflict: null })
+    sess = { id: a.id, diskText: a.diskText, diskModified: undefined, created: a.created, location: a.location }
+    restoreUI(a.ui)
+    useDoc.getState().open({ id: a.id, name: a.name, handle: null, created: a.created }, a.data)
+    await persistNow()
+  })
 }
 
-export async function openSample() {
-  const a = await loadArchive('sample')
-  sess = { id: 'sample', diskText: SAMPLE_DOC, diskModified: undefined, created: a?.created ?? Date.now() }
-  restoreUI(a)
-  useDoc.getState().open({ id: 'sample', name: SAMPLE_NAME, handle: null, created: sess.created }, a?.data ?? emptyData(SAMPLE_DOC))
-  await persistNow()
-}
+export const openRecent = serial(openRecentImpl)
+
+export const openSample = serial(async () => {
+  await present('sample', async () => {
+    const a = await loadArchive('sample')
+    sess = { id: 'sample', diskText: SAMPLE_DOC, diskModified: undefined, created: a?.created ?? Date.now() }
+    restoreUI(a?.ui)
+    useDoc.getState().open({ id: 'sample', name: SAMPLE_NAME, handle: null, created: sess.created }, a?.data ?? emptyData(SAMPLE_DOC))
+    await persistNow()
+  })
+})
+
+const openUntitled = serial(async (initial: string) => {
+  const id = uid('d')
+  await present(id, async () => {
+    sess = { id, diskText: initial, diskModified: undefined, created: Date.now() }
+    restoreUI(undefined)
+    useDoc.getState().open({ id, name: '未命名.md', handle: null, created: sess.created }, emptyData(initial))
+    await persistNow()
+  })
+})
 
 export async function newDocument() {
   const initial = '# 未命名\n\n'
@@ -249,11 +529,7 @@ export async function newDocument() {
     await openFromHandle(h)
     return
   }
-  const id = uid('d')
-  sess = { id, diskText: initial, diskModified: undefined, created: Date.now() }
-  restoreUI(undefined)
-  useDoc.getState().open({ id, name: '未命名.md', handle: null, created: sess.created }, emptyData(initial))
-  await persistNow()
+  await openUntitled(initial)
 }
 
 /** 内存中的文档另存为本地文件，之后的修改会直接写回该文件 */
@@ -268,10 +544,13 @@ export async function saveAs() {
   if (!h) return
   const modified = await writeHandle(h, doc.data.text)
   // 另存后成为新的独立文档存档（保留注释）
-  const id = doc.meta.id === 'sample' ? uid('d') : doc.meta.id
+  const oldId = doc.meta.id
+  const id = oldId === 'sample' ? uid('d') : oldId
   sess = { id, diskText: doc.data.text, diskModified: modified, created: doc.meta.created, location: (await locateFile(h))[0] }
   useDoc.setState({ meta: { ...doc.meta, id, name: h.name, handle: h } })
   useDoc.getState().markSaved(Date.now())
+  // 标签页跟随新的存档 id 与文件名
+  useTabs.setState({ tabs: useTabs.getState().tabs.map((t) => (t.id === oldId ? { id, name: h.name } : t)), active: id })
   await persistNow()
   useUI.getState().toast('已保存到 ' + h.name + '，之后的修改会自动写回该文件')
 }
@@ -308,16 +587,16 @@ export async function grantWrite() {
   } else useUI.getState().toast('未获得写入权限', { tone: 'error' })
 }
 
+/** 关闭当前标签页 */
 export function closeDoc() {
-  clearTimeout(writeTimer)
-  void persistNow()
-  sess = null
-  useDoc.getState().close()
-  useSession.setState({ conflict: null })
-  void refreshRecent()
+  const id = useDoc.getState().meta?.id
+  if (id) void closeTab(id)
 }
 
 export async function forgetArchive(id: string) {
+  // 存档删除后不能再由打开的标签页写回
+  parked.delete(id)
+  useTabs.setState({ tabs: useTabs.getState().tabs.filter((t) => t.id !== id) })
   await deleteArchive(id)
   await refreshRecent()
 }
@@ -476,16 +755,22 @@ let started = false
 export function startSession() {
   if (started) return
   started = true
-  void refreshRecent()
+  void refreshRecent().then(() => {
+    // 去掉存档已被删除的标签页
+    const ids = new Set(useSession.getState().recent.map((r) => r.id))
+    const tabs = useTabs.getState().tabs
+    if (tabs.some((t) => !ids.has(t.id))) useTabs.setState({ tabs: tabs.filter((t) => ids.has(t.id) || parked.has(t.id) || useDoc.getState().meta?.id === t.id) })
+  })
   void launchedFile().then((handle) => {
     if (handle) return openFromHandle(handle)
   }).catch((e) => useUI.getState().toast('打开失败：' + e.message, { tone: 'error', ms: 8000 }))
   useDoc.subscribe((s, p) => {
-    if (!s.meta) return
+    if (!s.meta || quiet) return
     if (s.data !== p.data) scheduleArchive()
     if (s.data.text !== p.data.text && s.meta.handle) scheduleWrite()
   })
   useUI.subscribe((s, p) => {
+    if (quiet) return
     if (s.mode !== p.mode || s.collapsed !== p.collapsed) scheduleArchive()
   })
   window.setInterval(() => {

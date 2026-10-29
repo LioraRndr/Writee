@@ -137,7 +137,7 @@ export class TableWidget extends WidgetType {
   }
 
   toDOM(view: EditorView) {
-    return new TableController(view, this).wrap
+    return new TableController(view, this).root
   }
 
   /** 同一张表格的内容或位置变化时原地更新，保留滚动位置与焦点，不整块重建 */
@@ -162,6 +162,11 @@ export class TableWidget extends WidgetType {
 }
 
 class TableController {
+  /**
+   * 部件根节点只用 padding 留出上下间距：CodeMirror 测量块级部件高度时不计 margin，
+   * 有 margin 会让高度表偏小，点击位置随之错到下面几行。
+   */
+  readonly root = el('div', 'cm-table-block')
   readonly wrap = el('div', 'cm-md-table')
   private readonly toolbar = el('div', 'cm-table-toolbar')
   private readonly scroller = el('div', 'cm-table-scroll')
@@ -183,7 +188,9 @@ class TableController {
     this.model = widget.model
     this.anchor = { row: this.model.rows.length > 1 ? 1 : 0, col: 0 }
     this.cursor = { ...this.anchor }
+    controllers.set(this.root, this)
     controllers.set(this.wrap, this)
+    this.root.appendChild(this.wrap)
     this.scroller.tabIndex = -1
     this.scroller.setAttribute('role', 'region')
     this.scroller.setAttribute('aria-label', '可编辑 Markdown 表格')

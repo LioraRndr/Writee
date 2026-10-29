@@ -159,6 +159,11 @@ function wikiRanges(state: EditorState) {
   return ranges
 }
 
+/** 公式跨越换行：视图插件不能替换换行符，必须交给 StateField 渲染 */
+function spansLines(state: EditorState, range: MathRange) {
+  return state.doc.lineAt(range.from).number !== state.doc.lineAt(range.to).number
+}
+
 function isMathBlock(state: EditorState, range: MathRange) {
   if (!range.display) return false
   const first = state.doc.lineAt(range.from)
@@ -392,7 +397,8 @@ function buildInline(view: EditorView): DecorationSet {
   for (const { from, to } of view.visibleRanges) {
     if (hide) {
       for (const m of maths) {
-        if (m.to < from || m.from > to || isMathBlock(state, m) || touches(state, focused, m.from, m.to)) continue
+        // 跨行公式由 mathBlockField 渲染；插件里替换换行会让 CodeMirror 更新到一半抛错，点击位置随之错行
+        if (m.to < from || m.from > to || isMathBlock(state, m) || spansLines(state, m) || touches(state, focused, m.from, m.to)) continue
         decos.push(Decoration.replace({ widget: new MathWidget(m.source, m.display, false, m.from) }).range(m.from, m.to))
       }
     }
@@ -517,15 +523,20 @@ const tableKeys = Prec.high(
   ]),
 )
 
+/** 独占整行的块级公式，以及夹在段落里但跨越换行的公式 */
 function buildMathBlocks(state: EditorState): DecorationSet {
   if (!state.facet(hideMarks)) return Decoration.none
   const focused = state.field(focusedField)
   const decos: Range<Decoration>[] = []
   for (const m of mathRanges(state)) {
-    if (!isMathBlock(state, m) || touches(state, focused, m.from, m.to)) continue
-    const from = state.doc.lineAt(m.from).from
-    const to = state.doc.lineAt(m.to).to
-    decos.push(Decoration.replace({ widget: new MathWidget(m.source, true, true, m.from), block: true }).range(from, to))
+    if (touches(state, focused, m.from, m.to)) continue
+    if (isMathBlock(state, m)) {
+      const from = state.doc.lineAt(m.from).from
+      const to = state.doc.lineAt(m.to).to
+      decos.push(Decoration.replace({ widget: new MathWidget(m.source, true, true, m.from), block: true }).range(from, to))
+    } else if (spansLines(state, m)) {
+      decos.push(Decoration.replace({ widget: new MathWidget(m.source, m.display, false, m.from) }).range(m.from, m.to))
+    }
   }
   return Decoration.set(decos, true)
 }

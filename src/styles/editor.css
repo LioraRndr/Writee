@@ -319,9 +319,12 @@
   font-size: 1.06em;
   color: inherit;
 }
+/*
+ * 块级部件（公式块、表格）不能用上下 margin：CodeMirror 测量块级部件高度时不计 margin，
+ * 高度表会比实际矮，点击它下面的文字时光标落到后面几行。间距一律用 padding。
+ */
 .cm-md-math.is-block {
-  margin: 0.65em 0 1em;
-  padding: 0.35em 0;
+  padding: 1em 0 1.35em;
   overflow-x: auto;
   overflow-y: hidden;
   container-type: inline-size;
@@ -336,12 +339,14 @@
   border-bottom: 1px dashed currentColor;
 }
 
+.cm-table-block {
+  padding: 0.55em 0 1.15em;
+}
 .cm-md-table {
   position: relative;
   /* 宽度随内容自适应：窄表不铺满，宽表封顶到版心，放不下时在表格内横向滚动 */
   width: fit-content;
   max-width: 100%;
-  margin: 0.55em 0 1.15em;
   cursor: text;
   border-radius: 10px;
   border: 1px solid var(--line);

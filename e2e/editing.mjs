@@ -260,6 +260,44 @@ async function wideContent(page, mode) {
   assertEq(shortCell, 1, `${mode}：短单元格不被长单元格挤成多行`)
 }
 
+// 公式与表格之后点击正文必须落在点中的那一行：
+// 段落里跨行的 $$…$$ 不能由视图插件替换换行（会让 CodeMirror 更新到一半抛错），
+// 块级部件也不能用上下 margin（高度表不计 margin，越往下点击错得越多）。
+async function formulaPositions(page, mode) {
+  await page.getByRole('button', { name: mode, exact: true }).click()
+  let doc = '# 公式定位\n\n## 节\n\n跨行的显示公式开始 $$\na + b\n$$ 结束。\n\n'
+  for (let k = 0; k < 5; k++) doc += `第 ${k} 段，含 $x_${k}^2$ 行内公式。\n\n$$\n\\frac{a_${k}}{b} + \\sum_{i=1}^{n} x_i\n$$\n\n| 列 | 值 |\n| --- | --- |\n| a | ${k} |\n\n`
+  doc += '末尾一行，点这里。\n'
+  await replaceDoc(page, doc)
+  await page.evaluate(() => { document.querySelector('.scroller').scrollTop = 0 })
+  await page.waitForTimeout(600)
+  await page.evaluate(() => document.fonts.ready)
+  await page.waitForTimeout(200)
+  assertEq(await page.locator('.cm-md-math').filter({ hasText: 'a+b' }).count(), 1, `${mode}：段落里跨行的公式也会渲染`)
+  const drift = await page.evaluate(() => {
+    const text = window.__writee.useDoc.getState().data.text
+    const view = window.__writee.registry.forPos(text.indexOf('末尾一行')).view
+    return [...view.contentDOM.querySelectorAll(':scope > .cm-line')]
+      .filter((l) => l.textContent.trim())
+      .map((l) => Math.abs(Math.round(l.getBoundingClientRect().top - view.documentTop - view.lineBlockAt(view.posAtDOM(l)).top)))
+  })
+  assert(Math.max(...drift) <= 1, `${mode}：编辑器高度表与实际行位置一致：${drift.join(',')}`)
+  // 末尾一行在文档最后：滚到底部让它进入视口（编辑器只渲染可见范围）
+  await page.evaluate(() => { const sc = document.querySelector('.scroller'); sc.scrollTop = sc.scrollHeight })
+  await page.waitForTimeout(400)
+  const last = page.locator('.cm-line', { hasText: '末尾一行' }).first()
+  await last.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await page.waitForTimeout(200)
+  const box = await last.boundingBox()
+  await page.mouse.click(box.x + 20, box.y + box.height / 2)
+  await page.waitForTimeout(100)
+  const line = await page.evaluate(() => {
+    const f = window.__writee.registry.focused()
+    return f ? f.view.state.doc.lineAt(f.view.state.selection.main.head).text : null
+  })
+  assertEq(line, '末尾一行，点这里。', `${mode}：点击公式与表格之后的文字，光标落在点中的行`)
+}
+
 export default async function ({ page }) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await openSample(page)
@@ -286,6 +324,8 @@ export default async function ({ page }) {
   await tableInteractions(page, '卡片')
   await wideContent(page, '编辑')
   await wideContent(page, '卡片')
+  await formulaPositions(page, '编辑')
+  await formulaPositions(page, '卡片')
 
   // 全角与半角标点必须可区分：正文不启用 pwid（本机装有思源宋体时会把“，”收窄成半角宽度）
   const east = await page.locator('.cm-content').first().evaluate((el) => [getComputedStyle(el).fontVariantEastAsian, getComputedStyle(el).fontFeatureSettings])

@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-11-01 · Writee v0.2.0 打包发布
+
+- 版本从 `0.1.0` 升至 `0.2.0`，本地生成 macOS arm64/x64 DMG 与 Windows x64 EXE；旧 `0.1.0` 产物保留。两个 DMG 均通过 `hdiutil verify`，三个包内的 `app.asar` 均确认包含 PDF preload、生产页面与正确版本。
+- 发布源码在独立副本中核对、测试并推送 `main`，标签 `v0.2.0` 触发原生 CI。修复两处发布流程问题：electron-builder 在构建末尾意外尝试自动发布（改为 `--publish never`），Release job 缺少 checkout 导致 `gh` 找不到 `.git`（补上 checkout）。macOS runner 先执行桌面 E2E，真实 `%PDF` 文件断言通过，随后才允许发布。
+- [Writee v0.2.0 Release](https://github.com/LioraRndr/Writee/releases/tag/v0.2.0) 已公开，三个附件齐全，说明包含功能、验证和未签名/公证提示。线上网页未部署。
+
+---
+
 ## 2026-11-01 · 精简 AGENTS 交接文档
 
 - 将 `AGENTS.md` 从约 43 KB 压缩到约 13 KB：合并逐文件目录与重复说明，22 条关键不变量全部保留但改为短句；历史过程不再重复，仍以本日志为准。

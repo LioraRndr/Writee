@@ -130,9 +130,9 @@ npm run e2e:desktop  # 先构建；退出占用 5183 的 Writee
 
 - **PDF 导出**：四套预设、纸张方向、字体字号、行距页边距、段间距、强调色、标题、三级目录、页眉页码及缩放预览已完成；设置存 `writee.pdf`。浏览器真实 PDF 和页码已验收，桌面直接保存代码及 E2E 已写好。
 - **最近能力**：Mermaid/SVG、相对路径本地图片与缩放、独立 Electron 桌面壳、macOS 默认 Markdown 打开与窗口复用均已完成。更早的编辑器、卡片、注释、AI、表格、多标签页等需求也已实现；过程见 DEVLOG。
-- **最新验证**：类型检查、24 项单元测试、生产构建、本机 Chrome 全部 10 组 E2E 通过。
-- **唯一新增待验**：当前 `/Applications/Writee.app` 占用 5183，未擅自关闭；退出后复跑 `npm run e2e:desktop` 验证桌面 PDF 保存。
-- 最新 `dist/` 已构建；本次未部署、未发布 Release、未生成新安装包，旧安装包不含 PDF 功能。
+- **最新验证**：类型检查、24 项单元测试、生产构建、本机 Chrome 全部 10 组 E2E，以及 CI macOS 桌面 E2E（含真实 PDF）均通过。
+- **已发布**：[Writee v0.2.0](https://github.com/LioraRndr/Writee/releases/tag/v0.2.0)，包含 macOS arm64/x64 DMG 和 Windows x64 EXE；安装包未签名/公证。发布 CI 会先跑桌面 E2E，再上传 Release。
+- 最新 `dist/` 已构建；本次未部署线上网页。
 
 ### 已知限制
 

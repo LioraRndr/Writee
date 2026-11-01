@@ -6,6 +6,7 @@ import { diffChanges, mapData, mapperFromChanges } from './mapping'
 import { splitSentences } from './sentences'
 import { buildNotesPrompt, EDIT_REMINDER } from './notesPrompt'
 import { importAnalysis } from '../analysis/format'
+import { diagramLanguage, isStandaloneSvgSource } from './svg'
 import type { DocData } from './types'
 
 const doc = (text: string): DocData => ({ text, tags: [], notes: [], edits: [], analysis: null, anchors: [] })
@@ -120,6 +121,19 @@ describe('analysis import', () => {
     expect(a.units.length).toBe(1)
     expect(text.slice(a.units[0].from, a.units[0].to)).toBe('正文第一句。')
     expect(a.summary?.thesis).toBe('t')
+  })
+})
+
+describe('diagram source', () => {
+  it('只识别受支持的围栏语言与独立 SVG 文档', () => {
+    expect(diagramLanguage('mermaid')).toBe('mermaid')
+    expect(diagramLanguage(' SVG ')).toBe('svg')
+    expect(diagramLanguage('svg title')).toBeNull()
+    expect(diagramLanguage('html')).toBeNull()
+    expect(isStandaloneSvgSource('<svg viewBox="0 0 10 10"><path d="M0 0" /></svg>')).toBe(true)
+    expect(isStandaloneSvgSource('<?xml version="1.0"?><svg />')).toBe(true)
+    expect(isStandaloneSvgSource('<div><svg /></div>')).toBe(false)
+    expect(isStandaloneSvgSource('<svg /><script>alert(1)</script>')).toBe(false)
   })
 })
 

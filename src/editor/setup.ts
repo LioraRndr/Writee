@@ -9,7 +9,7 @@ import { useUI } from '../store/uiStore'
 import { minimalChange } from '../core/mapping'
 import { tagInfo } from '../core/derive'
 import { primaryCat, tagLabel } from '../analysis/taxonomy'
-import { hideMarks, livePreview, renderedTableAt } from './livePreview'
+import { hideMarks, livePreview, renderedTableAt, diagramTheme } from './livePreview'
 import { focusTableAt } from './TableWidget'
 import { overlayField, setOverlay, type OverlaySpec } from './overlays'
 import { registry } from './registry'
@@ -44,6 +44,7 @@ export interface EditorOpts {
 }
 
 const hideComp = new Compartment()
+const diagramThemeComp = new Compartment()
 
 function groupFor(tr: Transaction) {
   if (tr.isUserEvent('input.type') || tr.isUserEvent('input.compose')) return 'type'
@@ -114,6 +115,7 @@ export function createEditor(opts: EditorOpts): EditorHandle {
     markdown({ base: markdownLanguage, addKeymap: true }),
     EditorView.lineWrapping,
     hideComp.of(hideMarks.of(useUI.getState().settings.livePreview)),
+    diagramThemeComp.of(diagramTheme.of(useUI.getState().settings.theme)),
     livePreview(),
     overlayField,
     EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off', lang: 'zh-CN' }),
@@ -212,6 +214,9 @@ export function createEditor(opts: EditorOpts): EditorHandle {
     if (destroyed) return
     if (s.settings.livePreview !== prev.settings.livePreview) {
       view.dispatch({ effects: hideComp.reconfigure(hideMarks.of(s.settings.livePreview)) })
+    }
+    if (s.settings.theme !== prev.settings.theme) {
+      view.dispatch({ effects: diagramThemeComp.reconfigure(diagramTheme.of(s.settings.theme)) })
     }
     if (
       s.hoverTag !== prev.hoverTag ||

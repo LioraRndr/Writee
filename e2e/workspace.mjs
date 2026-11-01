@@ -162,8 +162,16 @@ export default async function ({ page }) {
     await w.close()
     await W.session.persistNow()
     await W.session.openFromHandle(fresh)
+    for (let n = 0; n < 100 && d().fileStatus !== 'conflict'; n++) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await W.session.checkDisk()
+    }
     out.firstConflict = d().fileStatus
     await W.session.openRecent(d().meta.id)
+    for (let n = 0; n < 100 && d().fileStatus !== 'conflict'; n++) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await W.session.checkDisk()
+    }
     out.secondConflict = d().fileStatus
     await W.session.writeNow()
     out.safeDisk = await (await fresh.getFile()).text()

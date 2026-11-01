@@ -66,7 +66,7 @@ async function tableScenario(page, mode) {
     return d.text.slice(tag.from, tag.to)
   })
   assertEq(tagged, '香蕉', `${mode}：后续注释保持定位`)
-  await page.keyboard.press('Control+z')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
   await page.waitForTimeout(100)
   assert((await docText(page)).includes('| 苹果 | 1 |'), `${mode}：一次撤销恢复单元格`)
 
@@ -119,7 +119,8 @@ async function tableScenario(page, mode) {
   await clickAt(page, cell(page, 1, 0))
   await cell(page, 1, 0).press('Escape')
   await cell(page, 1, 0).press('Shift+ArrowRight')
-  await cell(page, 1, 0).press('Control+c')
+  await cell(page, 1, 0).press(process.platform === 'darwin' ? 'Meta+c' : 'Control+c')
+  await page.locator('.cm-table-status', { hasText: '已复制网格' }).waitFor({ timeout: 5000 })
   assertEq(await page.evaluate(() => navigator.clipboard.readText()), '苹果\t1', `${mode}：复制所选网格`)
   if (mode === '卡片') await shot(page, 'table-cards')
 }
@@ -149,7 +150,7 @@ async function tableInteractions(page, mode) {
   const a2 = await active()
   assertEq([a2.tag, a2.cell], ['TEXTAREA', '2:0'], `${mode}：Enter 继续编辑下一行同列`)
   assert(await page.evaluate(() => window.__tableWrap === document.querySelector('.cm-md-table') && window.__tableWrap.isConnected), `${mode}：提交后表格原地更新，不整块重建`)
-  await page.keyboard.press('Control+z')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
   await page.waitForTimeout(80)
   assert((await docText(page)).includes('| 苹果 | 1 |'), `${mode}：未改动时 Ctrl+Z 撤销上一格提交`)
   assert((await active()).inTable, `${mode}：撤销后焦点仍在表格内`)
@@ -164,7 +165,7 @@ async function tableInteractions(page, mode) {
   assert((await docText(page)).includes('Y'), `${mode}：失焦时提交`)
   const a3 = await active()
   assert(!a3.inTable && a3.cm, `${mode}：失焦提交不把焦点抢回表格：${JSON.stringify(a3)}`)
-  await page.keyboard.press('Control+z')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
 
   // Tab 走到最后一格再按 Tab：新增一行
   await page.waitForTimeout(80)
@@ -177,7 +178,7 @@ async function tableInteractions(page, mode) {
   assertEq(await page.locator('.cm-md-table tbody tr').count(), rows0 + 1, `${mode}：最后一格 Tab 新增一行`)
   assertEq((await active()).cell, '4:0', `${mode}：新行第一格进入编辑`)
   await page.keyboard.press('Escape')
-  await page.keyboard.press('Control+z')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
   await page.waitForTimeout(80)
   assertEq(await page.locator('.cm-md-table tbody tr').count(), rows0, `${mode}：撤销新增行`)
 
@@ -298,6 +299,93 @@ async function formulaPositions(page, mode) {
   assertEq(line, '末尾一行，点这里。', `${mode}：点击公式与表格之后的文字，光标落在点中的行`)
 }
 
+export async function diagramScenario(page, mode) {
+  await page.getByRole('button', { name: mode, exact: true }).click()
+  const doc = `# 图表\n\n## 流程\n\n\`\`\`mermaid\nflowchart LR\n  A[开始] --> B[完成]\n\`\`\`\n\n\`\`\`svg\n<svg xmlns="http://www.w3.org/2000/svg" width="180" height="60"><rect width="180" height="60" rx="8" fill="#dfeadf"/><text x="20" y="37">围栏 SVG</text></svg>\n\`\`\`\n\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 50"><circle cx="25" cy="25" r="18" fill="#c0533a"/><text x="52" y="31">原始 SVG</text></svg>\n\n图表后的末尾一行。\n`
+  await replaceDoc(page, doc)
+  await page.waitForFunction(() => document.querySelectorAll('.cm-md-diagram.is-ready').length === 3, null, { timeout: 15000 })
+  assertEq(await page.locator('.cm-md-diagram').evaluateAll((els) => els.map((el) => el.shadowRoot.querySelectorAll('svg').length).join(',')), '1,1,1', `${mode}：Mermaid 与两种 SVG 均渲染`)
+  assert((await page.locator('.cm-md-diagram.is-mermaid').evaluate((el) => el.shadowRoot.textContent)).includes('开始'), `${mode}：Mermaid 文本正确`)
+  const diagramSizes = await page.locator('.cm-md-diagram').evaluateAll((els) => els.map((el) => {
+    const box = el.shadowRoot.querySelector('svg').getBoundingClientRect()
+    return [box.width, box.height]
+  }))
+  assert(diagramSizes.every(([width, height]) => width > 20 && height > 20), `${mode}：所有 SVG 都有可见尺寸：${JSON.stringify(diagramSizes)}`)
+  assertEq(await docText(page), doc, `${mode}：图表渲染不改变 Markdown`)
+  await shot(page, `diagrams-${mode === '卡片' ? 'cards' : 'editor'}`)
+
+  const mermaid = page.locator('.cm-md-diagram.is-mermaid')
+  const initialWidth = await mermaid.evaluate((el) => el.shadowRoot.querySelector('svg').getBoundingClientRect().width)
+  await mermaid.getByRole('button', { name: '放大', exact: true }).click()
+  await page.waitForTimeout(100)
+  const enlargedWidth = await mermaid.evaluate((el) => el.shadowRoot.querySelector('svg').getBoundingClientRect().width)
+  assert(enlargedWidth > initialWidth * 1.2, `${mode}：Mermaid 可以放大：${initialWidth} → ${enlargedWidth}`)
+  assertEq(await mermaid.getByRole('button', { name: '适应宽度', exact: true }).textContent(), '125%', `${mode}：显示当前缩放比例`)
+  const canvas = mermaid.locator('.diagram-canvas')
+  const canvasBox = await canvas.boundingBox()
+  await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(canvasBox.x + canvasBox.width / 2 - 80, canvasBox.y + canvasBox.height / 2, { steps: 6 })
+  await page.mouse.up()
+  assert(await canvas.evaluate((el) => el.scrollLeft > 0), `${mode}：放大后可以拖动画布`)
+  assertEq(await mermaid.count(), 1, `${mode}：拖动画布不误回源码`)
+  await mermaid.getByRole('button', { name: '适应宽度', exact: true }).click()
+  await mermaid.getByRole('button', { name: '全屏查看', exact: true }).click()
+  await page.waitForFunction(() => !!document.fullscreenElement)
+  await mermaid.getByRole('button', { name: '全屏查看', exact: true }).click()
+  await page.waitForFunction(() => !document.fullscreenElement)
+
+  const themes = ['xuan', 'su', 'celadon', 'dusk', 'ink']
+  for (const theme of themes) {
+    await page.evaluate((theme) => window.__writee.useUI.getState().setSettings({ theme }), theme)
+    await page.waitForFunction((theme) => {
+      const frame = document.querySelector('.cm-md-diagram.is-mermaid.is-ready')
+      return frame?.shadowRoot.querySelector('svg')?.id.includes(`-${theme}-`)
+    }, theme, { timeout: 15000 })
+  }
+  await page.evaluate(() => window.__writee.useUI.getState().setSettings({ theme: 'xuan' }))
+  await page.waitForFunction(() => {
+    const frame = document.querySelector('.cm-md-diagram.is-mermaid.is-ready')
+    return frame?.shadowRoot.querySelector('svg')?.id.includes('-xuan-')
+  }, null, { timeout: 15000 })
+
+  const mermaidFrame = page.locator('.cm-md-diagram.is-mermaid')
+  await mermaidFrame.scrollIntoViewIfNeeded()
+  await clickAt(page, mermaidFrame)
+  await page.waitForTimeout(150)
+  assertEq(await page.locator('.cm-md-diagram.is-mermaid').count(), 0, `${mode}：点击图表回到源码`)
+  assertEq(await page.evaluate(() => {
+    const view = window.__writee.registry.focused()?.view
+    return view ? view.state.doc.lineAt(view.state.selection.main.head).text : null
+  }), '```mermaid', `${mode}：点击后光标在围栏开头`)
+
+  await replaceDoc(page, doc)
+  await page.waitForFunction(() => document.querySelectorAll('.cm-md-diagram.is-ready').length === 3, null, { timeout: 15000 })
+  const last = page.locator('.cm-line', { hasText: '图表后的末尾一行' }).first()
+  await last.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await page.waitForTimeout(150)
+  const box = await last.boundingBox()
+  await page.mouse.click(box.x + 20, box.y + box.height / 2)
+  assertEq(await page.evaluate(() => {
+    const view = window.__writee.registry.focused()?.view
+    return view ? view.state.doc.lineAt(view.state.selection.main.head).text : null
+  }), '图表后的末尾一行。', `${mode}：异步图表之后点击不落错行`)
+
+  const malicious = `# 安全\n\n## 图\n\n\`\`\`svg\n<svg xmlns="http://www.w3.org/2000/svg" onload="window.__svgXss=1"><script>window.__svgXss=2</script><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">bad</div></foreignObject><image href="https://example.com/track.png"/><a href="https://example.com"><text x="4" y="20">安全文本</text></a><style>@import url(https://example.com/x.css);</style></svg>\n\`\`\`\n\n\`\`\`mermaid\nflowchart LR\n  A[未完成\n\`\`\`\n`
+  await replaceDoc(page, malicious)
+  await page.waitForSelector('.cm-md-diagram.is-svg.is-ready', { timeout: 5000 })
+  await page.waitForSelector('.cm-md-diagram.is-mermaid.has-error', { timeout: 10000 })
+  const safe = await page.locator('.cm-md-diagram.is-svg').evaluate((el) => ({
+    scripts: el.shadowRoot.querySelector('svg')?.querySelectorAll('script,foreignObject,image,a,style').length,
+    onload: el.shadowRoot.querySelector('svg')?.hasAttribute('onload'),
+    text: el.shadowRoot.textContent,
+  }))
+  assertEq(safe.scripts, 0, `${mode}：危险 SVG 元素被移除`)
+  assertEq(safe.onload, false, `${mode}：SVG 事件属性被移除`)
+  assert(safe.text.includes('安全文本'), `${mode}：安全 SVG 文本保留`)
+  assertEq(await page.evaluate(() => window.__svgXss ?? 0), 0, `${mode}：SVG 脚本未执行`)
+}
+
 export default async function ({ page }) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await openSample(page)
@@ -326,6 +414,8 @@ export default async function ({ page }) {
   await wideContent(page, '卡片')
   await formulaPositions(page, '编辑')
   await formulaPositions(page, '卡片')
+  await diagramScenario(page, '编辑')
+  await diagramScenario(page, '卡片')
 
   // 全角与半角标点必须可区分：正文不启用 pwid（本机装有思源宋体时会把“，”收窄成半角宽度）
   const east = await page.locator('.cm-content').first().evaluate((el) => [getComputedStyle(el).fontVariantEastAsian, getComputedStyle(el).fontFeatureSettings])

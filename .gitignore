@@ -1,5 +1,6 @@
 node_modules
 dist
+release
 .vite
 *.log
 .DS_Store
@@ -12,3 +13,6 @@ dist
 
 # Windows 原生启动入口（注册时从 C# 源码生成）
 scripts/bin/
+
+# macOS 本机运行数据
+.mac-runtime/

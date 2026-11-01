@@ -1,0 +1,17 @@
+{
+  "commit": "5e67d594c5fe109d7d5c207b57e88629a9121fdb",
+  "assets": [
+    {
+      "path": "public/apple-touch-icon.png",
+      "sha": "1303d575ebb0edb16728ba8de6a320caf13780a4"
+    },
+    {
+      "path": "public/favicon.ico",
+      "sha": "8ec3da6bd2f3242b90e4379284ab45c1eb90a8be"
+    },
+    {
+      "path": "public/writee-logo.png",
+      "sha": "6d7f3ae56152a8b925698f7e01f5092a4ccd2c81"
+    }
+  ]
+}

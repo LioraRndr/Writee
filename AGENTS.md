@@ -1,5 +1,15 @@
 # Writee 开发指南（接手必读）
 
+## macOS 当前工作位置（2026-11-01）
+
+- 用户确认后续在 `/Volumes/AnonBox/R_Program/Writee` 修改和运行代码，本目录是 Mac 当前开发目录。
+- `package.json`、`src/`、`scripts/`、`node_modules/` 均直接位于本目录。
+- `Writee.app` 和 `启动 Writee.command` 也放在本目录内。Swift 启动器以解析符号链接后的应用父目录作为项目根目录，修改 Swift 后需重新编译并本地签名。
+- 旧 Codex outputs 中的 Writee 和 Writee.app 是指向本目录的符号链接；请直接在本目录开发。
+- 本目录不属于下文提到的 Linux rclone 工作区；那部分是历史跨平台约定。
+- 已验证从本目录后台冷启动服务、Markdown 默认打开和正文加载；地址仍为 localhost:5173，以延续同一 Chrome 存档。
+
+
 本文件是给后续开发者 / Agent 的交接文档：需求、运行环境、架构、关键约定、测试方法、当前进度与待办。
 **每次开发结束前请更新第 7 节“当前进度”和 [docs/DEVLOG.md](docs/DEVLOG.md)。**
 
@@ -91,6 +101,7 @@ src/
     cardOps.ts       移动文本块（自定义位置映射）、整体平移标题层级
     mapping.ts       位置映射 PosMapper、mapData、diff 生成变更集、记录手动修改
     math.ts          LaTeX 定界符扫描、代码/转义排除
+    svg.ts           图表语言识别、独立 SVG 判断、SVG 安全清理
     table.ts         表格不可变模型、Markdown/TSV 解析与序列化、行列操作
     links.ts         链接协议分类、wiki 文件索引扫描
     localFile.ts     本机文件请求、真实路径与限权系统动作客户端
@@ -110,6 +121,7 @@ src/
     setup.ts         createEditor（主编辑器与卡片编辑器共用）、视图 ↔ store 同步、覆盖层计算、useSel
     livePreview.ts   实时预览装饰（隐藏标记、公式、链接、表格、列表、引用、代码块等）
     MathWidget.ts    KaTeX 行内/块级公式部件
+    DiagramWidget.ts Mermaid/SVG 异步块级部件、主题渲染、Shadow DOM 隔离
     TableWidget.ts   渲染表格：控制器挂在 DOM 上原地更新（updateDOM），单元格编辑、拖选、右键/行列菜单、拖放与剪贴板
     LinkWidget.ts    wiki 文件索引渲染与点击回源码
     overlays.ts      注释标签、结构单元、修改痕迹的装饰
@@ -134,7 +146,9 @@ src/
     run.ts           流式分析（JSON Lines 边收边标注）、startAnalysis
     format.ts        writee-structure/1 文件格式的导入导出、单元定位
   styles/            fonts / theme（五套配色）/ app / editor / cards / rail
-e2e/                 端到端测试（playwright-core）
+e2e/                 端到端测试（playwright-core；含 Electron 生产应用）
+desktop/             Electron 单实例主进程、仅回环的静态与限权文件服务
+scripts/local-launch.cjs  Finder/桌面打开请求的原子队列（只存能力引用）
 docs/                结构分析格式、开发日志
 ```
 
@@ -180,6 +194,8 @@ useDoc.applyChanges / applyTransform / replaceText
 17. **全角标点**：正文不得启用 `font-variant-east-asian: proportional-width`（pwid），并显式写 `'pwid' 0`。本机装有思源宋体时 pwid 会把 `，`、`（`、`“` 收窄成与半角相同的宽度，全角/半角逗号无法区分。
 18. **窄屏布局**：≤900px 时左侧栏（大纲 / 标签页）仍在文档流中挤压正文，宽度为 `--outline-eff = min(--outline-w, 46vw)`（左侧栏内部元素都用这个变量）；右侧注释栏覆盖显示，两侧互斥。进入窄屏（含首次以窄屏打开）时收起两侧栏，状态记在 Workspace 模块变量 `lastNarrow`，切换标签页重新挂载不再收起。
 19. **块级部件与跨行装饰**：块级部件（公式块 `.cm-md-math.is-block`、表格根节点 `.cm-table-block`）不得设上下 `margin`，间距一律用 `padding`。CodeMirror 测量块级部件高度时不计 margin，高度表会比实际矮，越往下点击越错行（实测 5 组公式 + 表格后偏差 301px）。视图插件（`inlinePlugin`）的替换装饰不能跨越换行，否则 CodeMirror 在更新 DOM 到一半时抛 `RangeError`，屏幕与位置映射随之错乱；跨行的公式（包括段落中间的 `$$…$$`）由 `mathBlockField` 渲染：独占整行用块级部件，否则用行内部件。
+20. **Mermaid / SVG**：围栏与独立 SVG 都由 `diagramBlockField` 做块级替换，不得在 `inlinePlugin` 替换跨行内容。原始和生成的 SVG 必须经 `core/svg.ts` 清理，禁止脚本、事件、嵌入文档、导航链接和外部资源；部件用 Shadow DOM 隔离样式。Mermaid 动态加载、全局串行渲染，`securityLevel: 'strict'`，不执行 `bindFunctions`；异步任务要有代次与销毁保护，完成、失败和尺寸变化后 `requestMeasure()`。主题经 `diagramTheme` facet 重建，块根仍只用 padding。无宽高 SVG 按 viewBox 恢复固有尺寸，避免 flex 收缩成 0 或默认拉满版心。
+21. **桌面与启动队列**：Electron 只用固定 `http://127.0.0.1:5183` 回环来源，以保留 IndexedDB/localStorage；`desktop/server.cjs` 只提供 `dist` 静态文件、`localFiles()` 与原生文件对话框，不包含 Vite 或通用 AI 代理。Host/Origin/自定义头校验不得省略。主进程用单实例锁，macOS `open-file`、Windows 参数和第二实例统一进入 `local-launch.cjs` 队列；页面串行 `openFromHandle()` 后确认，重复文件只激活已有 Writee 标签。旧 macOS Chrome 启动器复用同一队列，AppleScript 只按 URL 激活窗口，不执行页面 JS。桌面和浏览器存档来源不同，不自动迁移。
 
 ## 6. 测试
 
@@ -194,10 +210,23 @@ useDoc.applyChanges / applyTransform / replaceText
   - `local-file` 真实本机文件读写、编码/冲突/存档、文件菜单与链接动作（动作请求拦截）
   - `editing` 两种模式的公式、表格编辑/撤销/注释定位/粘贴/拖放/真实剪贴板；表格进入编辑列宽不变、点击落点、Enter/Tab 流程、失焦不抢焦点、右键与行列菜单、拖选、添加行、方向键进出表格与撤销后保持渲染；全角标点不启用 pwid；宽表格 / 长公式不撑宽编辑器（两种模式下正文不出卡片和版心、列多的表格表内滚动、窄表按内容收缩、短单元格不折行）；公式与表格之后点击正文落在点中的行（段落中跨行的 `$$` 不报错且渲染、编辑器高度表与实际行位置一致）
   - `tabs` 多标签页：新开/切换保留正文、撤销历史、模式与滚动位置，文件型标签页切走前写回、切回载入外部修改、关闭前写回，Alt+数字、拖动排序、右键关闭其他、“+”回文档列表、左侧栏与大纲切换、刷新后恢复列表
+  - `desktop`（`npm run e2e:desktop`，需先构建）：独立临时存档中的 Electron 冷启动、离线 Mermaid/SVG、无 Node 全局、真实写回、A→B→A 单实例与内标签去重、原生打开/另存为；设置 `WRITEE_DESKTOP_EXECUTABLE` 可直接测试打包 `.app` / `.exe`
 - 系统文件选择框、真实 API Key、输入法（IME）、Safari/Firefox、实际外部程序打开无法自动化，需人工验证。
 - 云端容器里的 headless Chromium（Playwright 1243 版）对“从 IndexedDB 取回的 OPFS 句柄”调用任何方法（`isSameEntry`、`resolve`、`queryPermission`……）都会让页面崩溃，因此 `file-sync`、`workspace` 两组在该环境必然失败（改动前同样如此）；需在本机 Chrome 上跑。`tabs` 里的文件型标签页只打开一个 OPFS 文件、不触发取回句柄，可以在两处都运行。
 
-## 7. 当前进度（更新于 2026-10-29）
+## 7. 当前进度（更新于 2026-11-01）
+
+**本地图片与图表查看（2026-11-01）**：相对路径图片原先被 `ImageWidget` 直接标为占位；实际讲义 SVG 还带 `width="100%"`，与图片 `max-width: 100%` 循环计算后显示宽度为 0。现由当前文档能力令牌读取目录内图片，独占一行的图片按版心宽度显示，并支持放大、缩小和适应宽度。`local-file` 已断言这类 SVG 显示宽度超过 200px。旧安装包不含此修复，需退出正在运行的桌面版后安装新包，或刷新已重启的 localhost:5173。
+
+**Mermaid / SVG、独立桌面版与 macOS 窗口复用（2026-11-01）**：新增 ` ```mermaid `、` ```svg ` 和独立 SVG 块渲染，主编辑器与卡片共用块级 StateField；DOMPurify + 引用检查清理 SVG，Shadow DOM 隔离样式，Mermaid 懒加载、严格模式、全局串行与五主题重绘，异步测高和点击回源码。两种模式图表 E2E 覆盖恶意输入、固有尺寸、主题、图后点击定位，已检查编辑/卡片截图；纯静态生产包也通过无调试钩子与图表验收。
+
+新增 Electron + electron-builder 双平台桌面壳：固定 127.0.0.1:5183 回环静态服务复用限权文件接口，单实例、文件关联、原生打开/另存为、CSP 与导航限制；不依赖外部 Node、Chrome 或 Vite。已生成 `release/Writee-0.1.0-mac-arm64.dmg`、`release/Writee-0.1.0-mac-x64.dmg`、`release/Writee-0.1.0-win-x64.exe`（均未签名/公证）；直接从临时工作目录启动打包 arm64 `.app`，离线图表、真实写回、A→B→A 单窗口两内标签、原生对话框均通过。Windows 安装包已生成但未在 Windows 运行。新增原生 CI Release 配置和网页下载入口，尚未推送/发布。
+
+macOS 旧 Chrome 启动器改为原子文件队列 + AppleScript 激活现有窗口，后续 Finder 文件在同一页面成为 Writee 内标签；旧服务返回 HTML 时前端静默跳过。用户授权重启 5173 后，真实 Chrome A→B→A 已验证始终 1 个窗口、4 个既有标签，测试前文档已恢复，默认队列清空；新增 `local-file` 队列场景与完整测试通过。类型检查、22 项单元测试、生产构建及本机 Chrome 全部 9 组 E2E 通过。线上 `dist/` 已构建并通过纯静态验收，但本机没有服务器交接目录、SSH 配置或密钥，尚未部署 https://writee.sakisaki.top/ 或发布 Release。
+
+**macOS 默认 Markdown 应用（2026-10-31）**：首次依赖安装已由本机完成（`.mac-runtime/installed.json` 记录类型检查、测试及构建通过）。新增 Swift/AppKit 原生 `Writee.app`，接收 Finder 文件事件并以参数数组传给 Mac Node 启动器；复用原有 `registerFile` 能力令牌、文件读写和自动保存流程。Mac 启动器新增多文件参数与后台服务模式。应用本地签名校验通过，重新运行类型检查和 19 项单元测试通过。Finder 中先对验证文档单独关联并实测 Chrome 打开对应正文、显示已保存，再执行全部更改；Finder 已显示 `Writee（默认）`，确认适用于所有 `.md` 文件。之前默认应用为 Typora，记录在 `.mac-runtime/default-handler-before.json`。应用及相邻 Writee 源码文件夹需保持同级。后台服务的冷启动路径尚未单独验证，本次 UI 实测复用了现有 localhost:5173 服务。
+
+**macOS 本地安装准备（2026-10-31）**：本地独立副本，新增 `scripts/launch-mac.cjs`、`scripts/mac-assets.json` 及项目外同级的 Finder 双击入口。使用已验证可运行的 fnm Node.js 24.16.0，不改动 Homebrew。首次启动下载并校验原始图标、按锁文件安装依赖，执行类型检查、单元测试及构建，成功后启动仅监听 localhost:5173 的 Vite 并打开 Chrome。105 个上游文本文件已按 Git blob SHA 校验；启动脚本通过语法检查及 `--check` 预检。Codex 终端网络受限，依赖下载、构建和浏览器功能测试尚未完成，不能视为部署成功。Windows 脚本保持原样。
 
 **修复公式导致的点击错行（2026-10-29）**：用户反馈光标落不到点中的行、怀疑与 LaTeX 有关。查到两个原因：① 段落中间跨行的 `$$…$$` 被视图插件当作行内部件替换换行，CodeMirror 抛 `Decorations that replace line breaks may not be specified via plugins` 并在更新 DOM 到一半时中断，此后屏幕与位置映射错乱；② 公式块和表格用 CSS `margin` 留间距，CodeMirror 测高不计 margin，每个公式块 + 表格让高度表少约 60px，越往下点击越错（5 组之后偏差 301px，约 9 行）。修复：跨行公式统一交给 `mathBlockField`（整行用块级部件，否则用行内部件），视图插件只处理单行公式；公式块间距改为 padding，表格外加只有 padding 的 `.cm-table-block` 根节点，视觉间距不变。验证：逐行点击探针在编辑 / 卡片两种模式下全部落在点中的行，高度表与 DOM 位置偏差为 0；新增 E2E（并分别在只回退插件修复、只回退间距修复时确认会失败）；类型检查、19 项单元测试、生产构建通过，云端 9 组 E2E 中 7 组通过（`file-sync`、`workspace` 仍是容器环境问题）。上一轮 PR 已合并，本分支从最新 `main` 重新开始，推送到 `claude/adoring-thompson-ml3vu0`，未部署线上。
 
@@ -226,7 +255,7 @@ useDoc.applyChanges / applyTransform / replaceText
 **尚未验证 / 已知限制**
 - 未用真实 API Key 实测任何服务商（只有模拟测试）；第三方服务的跨域策略各不相同，必要时用“本地代理转发”。
 - 中文输入法组字、Safari/Firefox、触屏未测试。
-- 图片只显示 http(s)/data 链接，相对路径的本地图片显示为占位（没有目录访问权限）。
+- 图片：本机启动器与独立桌面版可读取当前 Markdown 目录内的相对路径图片（含 SVG）；纯网页 FSA 入口仍只显示 http(s)/data/blob。
 - 超长文档（> 10 万字、数百个小节）在卡片模式下每张卡片一个编辑器，未做虚拟化。
 - 存档只在本浏览器；清除站点数据会丢失注释，没有导出/导入存档功能。
 - 写回文件失败时内容只保留在浏览器存档中（顶栏显示“保存失败 · 重试”）。
@@ -239,7 +268,7 @@ useDoc.applyChanges / applyTransform / replaceText
 1. 存档导出 / 导入（注释与分析的备份、换电脑迁移）。
 2. 注释栏“列表视图”（窄屏已支持覆盖式单栏互斥）。
 3. AI 根据注释直接给出修改稿并做差异对比、逐条接受。
-4. 本地图片：申请目录权限后解析相对路径。
+4. 纯网页入口的相对路径图片：在获得工作目录授权后解析。
 5. 卡片视图虚拟化，支持超长文档。
 6. 结构分析分块（超长文章分段请求再合并）。
 7. 按需拆分 KaTeX 与编辑器主包，消除 Vite 分包提示。

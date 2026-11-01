@@ -8,13 +8,22 @@ import { createHash } from 'node:crypto'
 import { URL, assert, assertEq, shot } from './helpers.mjs'
 
 const { registerFile } = createRequire(import.meta.url)('../scripts/local-files.cjs')
-export const name = 'Windows 本地文件打开与写回'
+const { createLaunchQueue } = createRequire(import.meta.url)('../scripts/local-launch.cjs')
+export const name = '本机文件打开与写回'
 
 export default async function ({ page, errors }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'writee-e2e-'))
   const file = path.join(dir, '中文 路径 & 测试.md')
   const original = '\ufeff# 双击测试\r\n\r\n原有正文。\r\n'
   await fs.writeFile(file, original, 'utf8')
+  const launchQueue = createLaunchQueue(path.join(dir, 'launch'))
+  await page.route('**/__local_launch/', async (route) => {
+    const request = route.request()
+    if (request.method() === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(launchQueue.take()) })
+    const body = request.postDataJSON()
+    const ok = body.token === request.headers()['x-writee-token'] && launchQueue.confirm(body)
+    await route.fulfill({ status: ok ? 200 : 403, contentType: 'application/json', body: JSON.stringify(ok ? { ok: true } : { error: '启动请求授权无效' }) })
+  })
   const capability = registerFile(file)
   const target = `${URL}#local-file=${capability.key}&token=${capability.token}`
   try {
@@ -48,7 +57,7 @@ export default async function ({ page, errors }) {
     await page.waitForFunction(() => window.__writee?.useDoc.getState().meta?.name === '中文 路径 & 测试.md')
     assertEq(await page.evaluate(() => window.__writee.useDoc.getState().data.text), '# 双击测试\n\n原有正文。\n', '真实文件正文载入')
     await page.locator('.cm-content').first().click()
-    await page.keyboard.press('Control+End')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
     await page.keyboard.type('从编辑器输入。')
     await page.waitForFunction(() => window.__writee.useDoc.getState().fileStatus === 'saved')
     assertEq(await fs.readFile(file, 'utf8'), original + '从编辑器输入。', '真实编辑自动写回，保持 BOM + CRLF')
@@ -81,6 +90,7 @@ export default async function ({ page, errors }) {
       await window.__writee.session.openRecent(id)
     }, archiveId)
     assertEq(await page.evaluate(() => window.__writee.useDoc.getState().meta.id), archiveId, '最近文档可恢复本机文件连接')
+
     await shot(page, 'local-file')
     // 双方都改时沿用原有冲突弹窗，不覆盖磁盘。
     await page.evaluate(() => {
@@ -92,6 +102,25 @@ export default async function ({ page, errors }) {
     assertEq(await page.evaluate(() => window.__writee.useDoc.getState().fileStatus), 'conflict', '同时修改阻止自动写回')
     assertEq(await fs.readFile(file, 'utf8'), external + '外部改动。', '磁盘新稿未被覆盖')
     await page.evaluate(() => window.__writee.session.resolveConflict('disk'))
+
+    const assetDir = path.join(dir, '学习指南配图')
+    await fs.mkdir(assetDir)
+    await fs.writeFile(path.join(assetDir, '图 1.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="auto" viewBox="0 0 1100 520"><rect width="1100" height="520" fill="#dfeadf"/><text x="40" y="80">本地 SVG</text></svg>', 'utf8')
+    await page.evaluate(() => window.__writee.useDoc.getState().replaceText('# 图片\n\n![图1](学习指南配图/图%201.svg)\n', 'editor', true))
+    await page.waitForFunction(() => {
+      const image = document.querySelector('.cm-md-image img')
+      return image && image.complete && image.getBoundingClientRect().width > 200
+    })
+    const assetSource = await page.locator('.cm-md-image img').getAttribute('src')
+    assert(assetSource.includes('/__local_asset/'), '相对路径 SVG 通过限权接口加载')
+    const assetEndpoint = new globalThis.URL(assetSource, URL)
+    assertEq((await fetch(assetEndpoint)).status, 200, '当前文档目录内图片可以读取')
+    for (const target of ['../外部.svg', '/etc/passwd', 'https://example.com/x.svg']) {
+      assetEndpoint.searchParams.set('path', target)
+      assert((await fetch(assetEndpoint)).status >= 400, `拒绝目录外图片：${target}`)
+    }
+    await page.evaluate((text) => window.__writee.useDoc.getState().replaceText(text, 'editor', true), external)
+    await shot(page, 'local-file')
 
     const systemActions = []
     await page.route('**/__local_file/*', async (route) => {
@@ -119,12 +148,45 @@ export default async function ({ page, errors }) {
     const actionCount = systemActions.length
     await page.locator('.cm-md-link[data-href]').first().click()
     assertEq(systemActions.length, actionCount, '普通点击保持编辑，不打开链接')
-    await page.locator('.cm-md-link[data-href]').first().click({ modifiers: ['Control'] })
+    await page.locator('.cm-md-link[data-href]').first().click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] })
     await page.waitForTimeout(80)
     assertEq(systemActions[systemActions.length - 1], { action: 'open', target: 'https://example.com' }, 'Ctrl+点击网页交给系统默认浏览器')
-    await page.locator('.cm-md-wikilink[data-href]').click({ modifiers: ['Control'] })
+    await page.locator('.cm-md-wikilink[data-href]').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] })
     await page.waitForTimeout(80)
     assertEq(systemActions[systemActions.length - 1], { action: 'open', target: './目标 & 文件.txt' }, 'Ctrl+点击 wiki 文件索引')
+
+    const secondFile = path.join(dir, '第二个 文档.md')
+    await fs.writeFile(secondFile, '# 第二个文档\n\nB 正文。\n', 'utf8')
+    await page.goto('about:blank')
+    launchQueue.enqueue(registerFile(secondFile))
+    await page.goto(URL)
+    await page.waitForFunction(() => window.__writee?.useDoc.getState().meta?.name === '第二个 文档.md')
+    assertEq(page.context().pages().length, 1, '基础页面启动时消费队列，不新建浏览器页面')
+    await page.evaluate(() => {
+      const W = window.__writee
+      window.__launchTransitions = []
+      window.__launchUnsubscribe = W.useDoc.subscribe((state, previous) => {
+        if (state.meta?.id !== previous.meta?.id) window.__launchTransitions.push(state.meta?.name ?? null)
+      })
+    })
+    launchQueue.enqueue(registerFile(file))
+    launchQueue.enqueue(registerFile(secondFile))
+    launchQueue.enqueue(registerFile(file))
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await page.waitForFunction(() => window.__launchTransitions?.length === 3)
+    assertEq(await page.evaluate(() => window.__writee.useDoc.getState().meta?.name), '中文 路径 & 测试.md', 'A、B、A 最后激活 A')
+    await page.waitForFunction(async () => {
+      const response = await fetch('/__local_launch/', { headers: { 'X-Writee-Launch': '1' }, cache: 'no-store' })
+      return (await response.json()) === null
+    })
+    const launchTransitions = await page.evaluate(() => {
+      window.__launchUnsubscribe()
+      return window.__launchTransitions
+    })
+    assertEq(launchTransitions, ['中文 路径 & 测试.md', '第二个 文档.md', '中文 路径 & 测试.md'], '聚焦时串行处理 A、B、A')
+    assertEq(await page.locator('.tab').count(), 2, '连续打开复用 Writee 内已有标签页')
+    assertEq(await page.evaluate(() => window.__writee.useDoc.getState().meta.id), archiveId, '重新打开 A 激活原存档标签')
+    assertEq(page.context().pages().length, 1, 'A、B、A 全程不新建浏览器标签或窗口')
 
     // 错误来源、无令牌与陈旧版本都不能写入；这部分用 fetch 避免产生预期浏览器报错。
     const endpoint = URL + '__local_file/' + capability.key

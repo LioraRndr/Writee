@@ -297,12 +297,52 @@
   max-width: 100%;
   vertical-align: top;
 }
+.cm-md-image.is-block {
+  display: block;
+  width: 100%;
+  padding: 0.45em 0 0.9em;
+}
+.cm-image-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.cm-image-tools button {
+  min-width: 28px;
+  height: 27px;
+  padding: 0 7px;
+  color: var(--ink-2);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 12px/1 var(--font-ui);
+}
+.cm-image-tools button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.cm-image-frame {
+  width: 100%;
+  overflow: auto;
+}
+.cm-md-image.is-block .cm-image-frame {
+  max-height: 72vh;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+}
 .cm-md-image img {
-  max-width: 100%;
-  max-height: 480px;
+  width: auto;
+  max-width: none;
+  height: auto;
   border-radius: 8px;
   display: block;
-  margin: 0.3em 0;
+}
+.cm-md-image.is-block img {
+  width: 100%;
+  margin: 0;
+  border-radius: 0;
 }
 .cm-md-image.is-broken {
   color: var(--ink-3);
@@ -337,6 +377,35 @@
   font-size: 0.88em;
   color: var(--nc-cinnabar);
   border-bottom: 1px dashed currentColor;
+}
+
+/* 与公式、表格相同：块根只用 padding，异步绘制后主动请求 CodeMirror 重新测高 */
+.cm-diagram-block {
+  padding: 0.65em 0 1.25em;
+}
+.cm-md-diagram {
+  position: relative;
+  max-width: 100%;
+  padding: 18px;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: text;
+}
+.cm-md-diagram.has-error {
+  background: color-mix(in srgb, var(--nc-cinnabar) 4%, var(--bg-elev));
+  border-color: color-mix(in srgb, var(--nc-cinnabar) 30%, var(--line));
+}
+.cm-diagram-status {
+  padding-top: 6px;
+  color: var(--ink-3);
+  font: 11.5px/1.6 var(--font-ui);
+  text-align: center;
+}
+.cm-diagram-status:empty {
+  display: none;
 }
 
 .cm-table-block {

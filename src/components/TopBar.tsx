@@ -151,6 +151,7 @@ export function TopBar() {
               },
               { label: '另存为…', onSelect: () => void saveAs() },
               { label: '下载副本（.md）', onSelect: downloadCurrent },
+              { label: '导出 PDF…', onSelect: () => useUI.setState({ dialog: 'pdf' }) },
               { divider: true, label: '' },
               {
                 label: '复制文件路径',

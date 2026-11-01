@@ -38,6 +38,7 @@ export const IconDown = mk(<path d="M12 5v14m6-6-6 6-6-6" />)
 export const IconIndent = mk(<path d="M4 6h16M10 12h10M10 18h10M4 10l3 2-3 2" />)
 export const IconOutdent = mk(<path d="M4 6h16M10 12h10M10 18h10M7 10l-3 2 3 2" />)
 export const IconPlus = mk(<path d="M12 5v14M5 12h14" />)
+export const IconMinus = mk(<path d="M5 12h14" />)
 export const IconMore = mk(
   <>
     <circle cx="6" cy="12" r="1.3" fill="currentColor" stroke="none" />

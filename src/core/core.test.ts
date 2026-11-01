@@ -211,3 +211,22 @@ describe('table model', () => {
     expect(base.rows).toEqual([['A', 'B'], ['1', '2']])
   })
 })
+
+describe('PDF export options', () => {
+  it('计算纸张方向并生成对应的打印规则', async () => {
+    const { pdfPaperSize, pdfPageCss, PDF_DEFAULTS } = await import('./pdf')
+    expect(pdfPaperSize({ paper: 'a4', orientation: 'portrait' })).toEqual({ width: 210, height: 297 })
+    expect(pdfPaperSize({ paper: 'a5', orientation: 'landscape' })).toEqual({ width: 210, height: 148 })
+    expect(pdfPageCss({ ...PDF_DEFAULTS, paper: 'a5', orientation: 'landscape' })).toContain('size: A5 landscape')
+    expect(pdfPageCss({ ...PDF_DEFAULTS, paper: 'letter', orientation: 'portrait' })).toContain('size: letter portrait')
+    expect(pdfPageCss({ ...PDF_DEFAULTS, showPageNumbers: true })).toContain('content: counter(page)')
+    expect(pdfPageCss({ ...PDF_DEFAULTS, showHeader: true }, '文档 "一"')).toContain('@top-right')
+  })
+
+  it('生成安全的 PDF 文件名', async () => {
+    const { pdfFileName } = await import('./pdf')
+    expect(pdfFileName('文章：终稿.md')).toBe('文章：终稿.pdf')
+    expect(pdfFileName('a/b:c.md')).toBe('a_b_c.pdf')
+    expect(pdfFileName('.md')).toBe('未命名文档.pdf')
+  })
+})

@@ -1,288 +1,160 @@
 # Writee 开发指南（接手必读）
 
-## macOS 当前工作位置（2026-11-01）
-
-- 用户确认后续在 `/Volumes/AnonBox/R_Program/Writee` 修改和运行代码，本目录是 Mac 当前开发目录。
-- `package.json`、`src/`、`scripts/`、`node_modules/` 均直接位于本目录。
-- `Writee.app` 和 `启动 Writee.command` 也放在本目录内。Swift 启动器以解析符号链接后的应用父目录作为项目根目录，修改 Swift 后需重新编译并本地签名。
-- 旧 Codex outputs 中的 Writee 和 Writee.app 是指向本目录的符号链接；请直接在本目录开发。
-- 本目录不属于下文提到的 Linux rclone 工作区；那部分是历史跨平台约定。
-- 已验证从本目录后台冷启动服务、Markdown 默认打开和正文加载；地址仍为 localhost:5173，以延续同一 Chrome 存档。
-
-
-本文件是给后续开发者 / Agent 的交接文档：需求、运行环境、架构、关键约定、测试方法、当前进度与待办。
-**每次开发结束前请更新第 7 节“当前进度”和 [docs/DEVLOG.md](docs/DEVLOG.md)。**
-
-用户文档见 [README.md](README.md)；结构分析文件格式见 [docs/structure-format.md](docs/structure-format.md)。
-
----
+记录接手所需的约束与当前状态；详细历史见 [docs/DEVLOG.md](docs/DEVLOG.md)，用户说明见 [README.md](README.md)，分析格式见 [docs/structure-format.md](docs/structure-format.md)。
+**每次开发结束前更新第 7 节和 DEVLOG。**
 
 ## 0. 动手前注意
 
-- **项目目录是同步盘**：`/home/box/Writee-live` 是 rclone 挂载（远程 `writee:Writee`），同时同步到用户 Windows 电脑上的 `D:\R_Program\Writee`。用户和其他 Agent 窗口可能**同时**在改文件。
-  - 修改前先看目标文件的修改时间 / 内容，不要覆盖别人刚做的改动（例如 `public/`、`scripts/`、`index.html` 的图标与启动脚本就是另一个会话加的）。
-  - **绝不要在 box 上安装、删除或改动 `node_modules`**：它属于用户的 Windows 安装，删除会通过同步删掉用户本机的依赖（曾经发生过，见 DEVLOG）。
-  - 写文件到挂载盘较慢（约 17ms/文件），大量小文件的操作不要放在挂载盘上做。
-- 界面文案、代码注释用中文；保持现有代码风格（无分号、单引号、2 空格、prettier 风格）。
-- 不引入 UI 组件库；颜色一律用 CSS 变量，新增变量要在 `src/styles/theme.css` 的五套主题里都补齐。
+- **当前开发目录是 macOS 的 `/Volumes/AnonBox/R_Program/Writee`**，源码、依赖、`Writee.app` 和启动脚本都在这里；旧 outputs 路径只是符号链接。继续使用 `localhost:5173` 和现有 Chrome 存档。
+- Swift 启动器以解析符号链接后的应用父目录为项目根；改 Swift 后必须重新编译并本地签名。
+- 界面文案与必要注释用中文；沿用无分号、单引号、2 空格风格。不引入 UI 组件库；UI 颜色使用 CSS 变量，新变量补齐 `theme.css` 五套主题。
+- 同步盘可能有多人同时修改：先读目标文件，不覆盖他人改动。Linux box 上**绝不要安装、删除或改动同步盘的 `node_modules`**，它属于 Windows。
 
-## 1. 需求摘要（来自用户）
+## 1. 产品与技术栈
 
-1. 基础：Markdown 编辑器，实时编辑并渲染；打开本地 md 文件，直接修改原文件。
-2. 标题跳转：按标题层级的侧边导航。
-3. 卡片界面：按小标题切成嵌套卡片；兼容不同 AI 的标题层级习惯（按相对层级嵌套）；卡片调序、增删等体验流畅；卡片内 Markdown 依然清楚。
-4. 注释：框选文字生成数字标签；注释可连接多个标签；侧边用连线显示对应关系，一目了然；增删查改体验好；注释不写入文件，但每篇文档有存档，注释可保存。
-5. 一键复制注释：批量选择后复制成提示词，带文章上下文，简洁；若文章有**在本编辑器中手动**修改的部分，提示词要提醒：“我做了一些修改，注意不要替换成原来的文字，必要的话可以修改”。
-6. 结构标签分析：以句子为单位（一句或多句），标准的分析文件格式，标签丰富（论证要素、写作手法等）；BYOK 接入 AI 一键分析标注。
-7. AI 接入用**通用接口**：OpenAI 兼容、Anthropic 兼容，都能接第三方。
-8. 视觉：优雅美观、便于阅读编辑、行距略宽松；字体思源宋体（CJK）+ Instrument Serif（西文）；配色预设。
-9. 动效要做好；侧边栏可拖拽调宽。
-10. 维护好项目文档，方便其他 Agent 无缝衔接。
+Writee 是本地 Markdown 写作工具：实时编辑并写回原文件，标题大纲、相对层级嵌套卡片、选区标签与注释连线、注释提示词、句子级结构分析，以及 BYOK 的 OpenAI / Anthropic 兼容接口。注释和分析只进存档，不写进 Markdown。
+
+React 19 + TypeScript + Vite 8 + CodeMirror 6 + zustand；IndexedDB（idb-keyval）；diff-match-patch；markdown-it、KaTeX、Mermaid、DOMPurify；@anthropic-ai/sdk 和 Mermaid 按需加载；字体为 Noto Serif SC + Instrument Serif。
 
 ## 2. 运行环境
 
-### 用户本机（Windows）
+### macOS / Windows 本机
 
 ```bash
 npm install          # 依赖损坏时用 npm ci
-npm run dev          # http://localhost:5173（必须用 localhost 或 https，才能直接读写本地文件）
+npm run dev          # http://localhost:5173
+npm run typecheck
+npm test
+npm run build
 ```
 
-- `scripts/launch-writee.vbs` → `launch-writee.cjs`：后台启动 Vite（`localhost:5173`，日志写到项目根目录的 `writee-server.log` / `writee-server-error.log`），通过 `public/writee-launch.json` 里的 id 确认服务是 Writee，然后优先用 Chrome 的 `--app` 窗口打开（未安装时回退到 Edge）。`scripts/create-desktop-shortcut.ps1` 创建桌面快捷方式。这些脚本由另一个会话编写，改动前先确认。
-- 日志文件已被 `.gitignore`（`*.log`）忽略。
+- File System Access 只在 `localhost` 或 HTTPS 可用；普通 HTTP/IP 会退化为存档模式。
+- Windows 的 `scripts/launch-writee.vbs` 后台启动 Vite，通过 `writee-launch.json` 验证服务，再优先打开 Chrome app 窗口，未安装时回退 Edge。相关启动与注册脚本改动前先确认现状。
+- 独立 Electron 版固定使用 `http://127.0.0.1:5183`，与浏览器、线上存档互不迁移。
 
-### 远程开发机（Linux box，Agent 用）
+### Linux box（历史远程环境）
 
-挂载盘太慢且 `node_modules` 属于 Windows，所以 box 上的依赖与构建都在本地磁盘：
-
-| 路径 | 作用 |
+| 路径 | 用途 |
 | --- | --- |
-| `/home/box/Writee-live` | 源码（挂载盘，与 Windows 同步）——**只在这里改源码** |
-| `/home/box/.writee-deps` | 本地工作副本：`node_modules`、vite 开发服务器、测试都在这里跑 |
-| `/home/box/node_modules` | 指向 `.writee-deps/node_modules` 的软链接 |
-| `/home/box/sync-writee.sh` | 把挂载盘上新修改的文件增量复制到 `.writee-deps`（按时间戳，跳过 node_modules / dist / 日志） |
-| `/home/box/restart-vite.sh` | 在 `.writee-deps` 里（重新）启动 `vite --port 5173` |
-
-常用流程：
+| `/home/box/Writee-live` | rclone 源码挂载盘，只在这里改源码 |
+| `/home/box/.writee-deps` | 本地依赖、Vite、测试与构建副本 |
+| `/home/box/sync-writee.sh` | 按时间戳同步源码，跳过依赖、dist、日志 |
+| `/home/box/restart-vite.sh` | 重启 5173 |
 
 ```bash
-/home/box/sync-writee.sh                       # 改完源码后同步（vite 会自动热更新）
+/home/box/sync-writee.sh
 cd /home/box/.writee-deps
-./node_modules/.bin/tsc --noEmit -p .          # 类型检查
-./node_modules/.bin/vitest run                 # 单元测试
-CHROME_PATH=/usr/bin/google-chrome node e2e/run-all.mjs   # 端到端（需 vite 在跑）
-./node_modules/.bin/vite build --outDir /tmp/writee-dist  # 构建检查（不要输出到挂载盘）
+./node_modules/.bin/tsc --noEmit -p .
+./node_modules/.bin/vitest run
+CHROME_PATH=/usr/bin/google-chrome node e2e/run-all.mjs
+./node_modules/.bin/vite build --outDir /tmp/writee-dist
 ```
 
-若上述脚本丢失，可按以下内容重建：
+不要用 `pkill -f vite`；用 `pgrep -f "[n]ode_modules/.bin/vite"` 取 PID。挂载盘上不做大量小文件操作。
 
-```bash
-# /home/box/sync-writee.sh
-SRC=/home/box/Writee-live; DST=/home/box/.writee-deps; STAMP=/home/box/.writee-sync-stamp
-cd $SRC; [ -f $STAMP ] && NEWER="-newer $STAMP"; touch $STAMP.next
-find . -path ./node_modules -prune -o -path ./dist -prune -o -name "*.log" -prune -o -name "*.partial" -prune \
-  -o -type f $NEWER -print | while read f; do mkdir -p "$DST/$(dirname "$f")"; cp "$f" "$DST/$f"; echo "synced $f"; done
-mv $STAMP.next $STAMP
+## 3. 目录速查
 
-# 依赖：在 /home/box/.writee-deps 放一份 package.json + package-lock.json 后 npm ci
-```
-
-注意：用 `pkill -f vite` 之类的命令可能把当前 shell 一起杀掉；用 `pgrep -f "[n]ode_modules/.bin/vite"` 取 pid 再 kill。
-
-## 3. 技术栈与目录
-
-React 19 + TypeScript + Vite 8 + CodeMirror 6 + zustand；IndexedDB（idb-keyval）；diff-match-patch；@anthropic-ai/sdk（按需动态加载）；字体 @fontsource/noto-serif-sc、@fontsource/instrument-serif。
-
-```
+```text
 src/
-  core/        纯逻辑（无 React）
-    types.ts         数据类型：DocData / Tag / Note / Unit / EditRange / DocArchive
-    sections.ts      解析 ATX 标题 → 小节树（相对层级嵌套、唯一 H1 视为标题、锚点保持 id 稳定）
-    cardOps.ts       移动文本块（自定义位置映射）、整体平移标题层级
-    mapping.ts       位置映射 PosMapper、mapData、diff 生成变更集、记录手动修改
-    math.ts          LaTeX 定界符扫描、代码/转义排除
-    svg.ts           图表语言识别、独立 SVG 判断、SVG 安全清理
-    table.ts         表格不可变模型、Markdown/TSV 解析与序列化、行列操作
-    links.ts         链接协议分类、wiki 文件索引扫描
-    localFile.ts     本机文件请求、真实路径与限权系统动作客户端
-    sentences.ts     切句（结构分析与“修改过的句子”共用）
-    notesPrompt.ts   复制给 AI 的提示词
-    archive.ts       IndexedDB 存档与“最近的文档”索引
-    fileAccess.ts    File System Access API 封装、下载、剪贴板
-    derive.ts        标签编号、标签→注释索引、字数
-    platform.ts      ⌘/Ctrl 快捷键文案
-    core.test.ts     核心逻辑单元测试
-    localFiles.test.ts 链接与本机系统动作测试（注入 OS 边界）
-  store/
-    docStore.ts      文档状态（唯一事实来源）+ 全局撤销 + 卡片操作
-    uiStore.ts       界面状态与设置（localStorage）、提示条
-    session.ts       多标签页（停放/切回/关闭/串行队列）、打开/新建/另存/自动保存/外部修改轮询/冲突处理、链接打开
-  editor/
-    setup.ts         createEditor（主编辑器与卡片编辑器共用）、视图 ↔ store 同步、覆盖层计算、useSel
-    livePreview.ts   实时预览装饰（隐藏标记、公式、链接、表格、列表、引用、代码块等）
-    MathWidget.ts    KaTeX 行内/块级公式部件
-    DiagramWidget.ts Mermaid/SVG 异步块级部件、主题渲染、Shadow DOM 隔离
-    TableWidget.ts   渲染表格：控制器挂在 DOM 上原地更新（updateDOM），单元格编辑、拖选、右键/行列菜单、拖放与剪贴板
-    LinkWidget.ts    wiki 文件索引渲染与点击回源码
-    overlays.ts      注释标签、结构单元、修改痕迹的装饰
-    registry.ts      已挂载视图登记、位置 → 页面坐标（posBox）、布局重算调度
-    inline.ts        表格单元格的行内 Markdown / 公式 / 链接渲染
-  components/
-    Workspace.tsx    主布局、左侧栏“大纲/标签页”切换、选区工具条、标签弹出框、委托事件
-    TabStrip.tsx     标签栏（顶部横排 / 左侧栏竖排）：切换、关闭、拖动排序、右键菜单
-    MainEditor.tsx   编辑模式
-    cards/           卡片视图（CardsView、CardEditor、dnd 树形拖拽、focus 推迟重排、fold 折叠交叉过渡）
-    rail/            注释栏（NotesRail）、结构栏（StructureRail）、对齐布局与连线（layout.ts）、TagPicker
-    Outline.tsx      大纲（可拖拽排序）
-    Resizer.tsx      侧栏宽度拖拽
-    motion.ts        FLIP、进出场、平滑滚动
-    hooks.ts         useWordCount、usePlacementClass
-    reveal.ts        跳转到位置/小节（含平滑滚动）
-    dialogs/         复制、设置、AI 设置、导入分析、格式说明、冲突
-  analysis/
-    taxonomy.ts      标签体系（8 类 90 个）
-    prompt.ts        分析提示词（系统提示 + 按句编号的全文）
-    ai.ts            通用 AI 接口（OpenAI 兼容 / Anthropic 兼容）、测试连接、模型列表
-    run.ts           流式分析（JSON Lines 边收边标注）、startAnalysis
-    format.ts        writee-structure/1 文件格式的导入导出、单元定位
-  styles/            fonts / theme（五套配色）/ app / editor / cards / rail
-e2e/                 端到端测试（playwright-core；含 Electron 生产应用）
-desktop/             Electron 单实例主进程、仅回环的静态与限权文件服务
-scripts/local-launch.cjs  Finder/桌面打开请求的原子队列（只存能力引用）
-docs/                结构分析格式、开发日志
+  core/        纯逻辑：types / sections / cardOps / mapping / math / svg / table
+               links / localFile / sentences / notesPrompt / archive / fileAccess
+               pdf / pdfRender / mermaid / derive / platform 及单元测试
+  store/       docStore（全文、撤销、卡片）；uiStore；session（文件与多标签页）
+  editor/      CodeMirror 同步、实时预览、公式/图表/表格/链接部件、覆盖层与定位
+  components/  Workspace、卡片、注释/结构栏、大纲、标签栏、动效与全部对话框
+  analysis/    标签体系、提示词、通用 AI、流式分析、分析文件导入导出
+  styles/      fonts / theme / app / editor / cards / rail / pdf
+e2e/           Chrome 与 Electron 端到端测试
+desktop/       Electron 主进程、隔离 preload、回环静态与限权文件服务
+scripts/       各平台启动、文件授权与原子打开队列
+docs/          格式文档与开发日志
 ```
 
 ## 4. 数据流
 
-```
-CodeMirror 视图（主编辑器 1 个 / 每张卡片 1 个）
-   │ 用户输入 → updateListener → 转成全文 ChangeSet（origin = 视图 id）
-   ▼
-useDoc.applyChanges / applyTransform / replaceText
-   │ 1. 推入撤销历史（DocData 快照）
-   │ 2. 生成新文本；mapData 用 PosMapper 映射 tags / units / edits / anchors
-   │ 3. userEdit 时把变更区域记入 edits（手动修改）
-   │ 4. 重建小节树（anchors 保持标题 id）
-   │ 5. 发出 event { origin, touched, map }
-   ▼
-订阅者：其他视图按 origin/touched 决定是否同步文本（带 syncAnnot，不回写）
-        覆盖层（标签、结构、修改痕迹）RAF 合并后重算
-        session.ts：500ms 写存档、700ms 写回文件
-        React 组件：大纲、注释栏、状态栏……
+```text
+CodeMirror 输入 → useDoc.applyChanges / applyTransform / replaceText
+  → 保存不可变 DocData 快照用于撤销
+  → PosMapper 映射 tags / units / edits / anchors，并重建小节树
+  → 发出 { origin, touched, map }
+  → 其他视图用 minimalChange + syncAnnot 同步，覆盖层 RAF 重排
+  → session：500ms 写存档、700ms 写回文件
 ```
 
-多标签页：useDoc 始终只装“当前标签页”的文档。切换时 `session.park()` 先写回文件、写存档，再把 `meta / data / past / future / 文件状态 / 磁盘基线 sess / 冲突 / 模式与折叠 / 滚动位置` 停放到内存 `parked`；切回时 `unpark()` 用 `useDoc.restore()` 原样恢复（撤销历史不丢），随后立即 `checkDisk()`。标签页列表（id + 名称）存在 localStorage `writee.tabs`，刷新后只恢复列表，点选时再从存档载入。
+- 全文与全文字符偏移是唯一事实来源；注释、结构、修改位置都由此派生。
+- 多标签页只把当前文档装入 `useDoc`。`session.park()` 保存正文、撤销历史、文件状态、磁盘基线、模式、折叠和滚动位置；`unpark()` 原样恢复并立即检查磁盘。
+- 标签页列表存在 `writee.tabs`；刷新只恢复列表，点选时再载入。后台页不轮询磁盘。
 
-## 5. 关键约定与不变量（改代码前务必理解）
+## 5. 关键约定与不变量
 
-1. **全文是唯一事实来源**。所有位置数据都是全文字符偏移。任何文本变化必须走 `applyChanges` / `applyTransform`（自定义映射，如移动卡片）/ `replaceText`（diff 映射，如外部修改、整体替换）之一，不要直接改 `data.text`。
-2. **DocData 不可变**：撤销历史保存的是对象引用，更新时创建新数组/对象，不要原地修改。
-3. **视图同步协议**：视图自己的输入由 store 发回时（origin 相同）只更新 base；其他来源的变化用 `minimalChange` 同步并加 `syncAnnot`，以免回写。撤销/重做是 origin `history`。
-4. **手动修改**只记录 `userEdit: true` 的变更（编辑器输入、卡片增删移动）。外部文件修改（origin `disk`）、撤销都不算。复制提示词时据此决定是否提醒 AI。
-5. **卡片编辑器聚焦时推迟结构重排**：在卡片里键入 `## ` 会产生新小节，但要等失焦后才拆分卡片（`cards/focus.ts` + CardsView 的 `pending`），否则光标会被打断。
-6. **标题 id 稳定**：`anchors` 随文本映射，`buildSections` 按位置匹配复用 id；卡片折叠状态按 id 存档。
-7. **卡片的层级是相对的**：顶层卡片 = 去掉“唯一的 H1 标题”后最外层的小节；移动到新父级时整节标题按新兄弟的级别平移（`moveSection`）。
-8. **浮层定位**（注释栏、结构栏、连线、选区工具条）全部使用 page 元素坐标；优先用 DOM 中的徽标（`[data-tag-badge]`、`[data-unit-start]`），视图虚拟化导致不在 DOM 时用 `registry.posBox` 估算。需要重排时调用 `registry.requestLayout()`（RAF 合并）。
-9. **绝对定位的卡片**（注释、结构标签）用 `usePlacementClass`：未定位时 `visibility: hidden`。**隐藏元素无法获得焦点**，需要聚焦的逻辑要等定位之后（NoteCard 的 autoFocus 已处理）。
-10. **AI 接口**：`ai.ts` 只有当 Base URL 是 `api.anthropic.com` 时才附加官方专属参数（自适应思考 + effort、`fallbacks: "default"` + beta 头、system 的 cache_control），并且只有带 beta 时才走 `client.beta.messages`；第三方只发送 `model / max_tokens / system / messages / stream` 加用户的“额外参数”。默认模型 `claude-opus-5-5`。
-11. **存储**：注释、分析、修改痕迹、卡片折叠只存在 IndexedDB（`writee` 库），永不写入 md 文件；设置与 AI 配置在 localStorage（`writee.settings`、`writee.ai`、`writee.copyopts`），打开的标签页列表在 `writee.tabs`。
-12. **动效**：统一用 `components/motion.ts`（FLIP、animateOut、smoothScroll），都要尊重 `prefers-reduced-motion`。CSS 进场动画用 `animation-fill-mode: backwards`，避免动画结束后残留 transform 覆盖其他样式。`CardEditor` 必须在 layout effect 中挂载，父级 FLIP 只能读取真实编辑器高度；E2E 要求动画终点与最终自然高度误差不超过 2px，不能把空容器高度当成终点。折叠标题与展开标题必须共享字号、行高、padding、`font-feature-settings` 与东亚字体变体。折叠/展开由 `cards/fold.ts` 处理：在 `collapsed` 变化的同步监听里（React 重渲染前）把即将移除的内容（展开前的摘要按钮 / 收起前的编辑器与子卡片）克隆成 `.card-fold-ghost`，去掉全部 `data-*`、焦点与光标层，标题在克隆里隐藏；新内容的淡入由卡片上的 `data-fold` 属性驱动的 CSS（编辑器首行即标题不参与）。**标题在任何一侧都不能模糊或淡入**。`playFlip` 在折叠时按最大高度变化量统一时长（240–460ms）与曲线 `FOLD_EASE`，且必须逐个读取元素位置（前面已开始的高度动画会推动后面的元素，批量读取会导致位移翻倍）。减少动态效果时不创建幽灵层。
-13. **调试钩子**：开发模式下 `window.__writee = { useDoc, useUI, registry, session, buildNotesPrompt, importAnalysis, buildManualPrompt }`，e2e 依赖它，改名需同步修改 `e2e/`。
-14. **表格写回**：`core/table.ts` 统一解析与序列化；Widget 产生差异后必须加表格起点 `from`，并交给当前视图构造 ChangeSet，不能把表格局部长度的 ChangeSet 直接 dispatch 给整篇文档。`TableController` 挂在部件 DOM 上，`updateDOM` 原地更新（同一张表：起点或源码之一相同），提交后的焦点由 `focusRequests` 交接；重建表格时旧编辑框被移除会触发 focusout，必须用 `rendering` 标记忽略；失焦提交带 `focus: false`，不能把焦点抢回表格。编辑框覆盖在单元格上、隐藏的 `.cm-table-sizer` 撑开尺寸，进入编辑前记下格宽作为编辑格的 `min-width`，保证列宽不变。表格宽度 `fit-content` + `max-width: 100%`、`table { width: auto }`：按内容收缩，长单元格格内换行，短单元格（≤6em、单行）加 `.is-short` 不折行；不要再给列设固定最小宽度（会抬高表格最小宽度，列多时把整个编辑器撑宽）。`.cm-content` 必须保持 `min-width: 0`：它是 flex 子项，默认最小宽度等于最宽内容，宽表格 / 长公式会让正文跟着跳出卡片与版心。部件自己处理的按键要 `stopPropagation`，全局 ⌘Z 也会跳过 `defaultPrevented` 的事件，避免撤销两次。撤销/重做把光标送回变化处时，若落在渲染表格内则改为选中单元格（`renderedTableAt` + `focusTableAt`），上下方向键从正文进入表格同理，表格只在主动“编辑源码”或在源码里输入时才显示 Markdown。
-15. **本机系统动作**：`open/reveal` 复用现有限权令牌与 localhost POST 通道，不开放任意网页调用；相对路径以当前 Markdown 目录解析，OS 调用禁止 shell 拼接。网页版没有真实绝对路径时不伪造。
-16. **多标签页**：打开、切换、关闭都经过 `session.ts` 的 `serial()` 队列；内部互相调用用 `*Impl` 版本，避免排队等自己。新文档一律走 `present(id, install)`：已在前台只检查磁盘，在后台则切回，否则停放当前文档后载入并插到当前标签页之后。后台标签页不轮询磁盘，切回时检查。恢复快照期间 `quiet` 为真，跳过自动写回/存档调度。工作目录迁移会同步更新后台快照的 `sess.location`。Workspace 按 `meta.id` 重新挂载，滚动位置用 `pendingScrollFor(id)` 读取、应用后再清除（开发模式 StrictMode 会挂载两次）。
-17. **全角标点**：正文不得启用 `font-variant-east-asian: proportional-width`（pwid），并显式写 `'pwid' 0`。本机装有思源宋体时 pwid 会把 `，`、`（`、`“` 收窄成与半角相同的宽度，全角/半角逗号无法区分。
-18. **窄屏布局**：≤900px 时左侧栏（大纲 / 标签页）仍在文档流中挤压正文，宽度为 `--outline-eff = min(--outline-w, 46vw)`（左侧栏内部元素都用这个变量）；右侧注释栏覆盖显示，两侧互斥。进入窄屏（含首次以窄屏打开）时收起两侧栏，状态记在 Workspace 模块变量 `lastNarrow`，切换标签页重新挂载不再收起。
-19. **块级部件与跨行装饰**：块级部件（公式块 `.cm-md-math.is-block`、表格根节点 `.cm-table-block`）不得设上下 `margin`，间距一律用 `padding`。CodeMirror 测量块级部件高度时不计 margin，高度表会比实际矮，越往下点击越错行（实测 5 组公式 + 表格后偏差 301px）。视图插件（`inlinePlugin`）的替换装饰不能跨越换行，否则 CodeMirror 在更新 DOM 到一半时抛 `RangeError`，屏幕与位置映射随之错乱；跨行的公式（包括段落中间的 `$$…$$`）由 `mathBlockField` 渲染：独占整行用块级部件，否则用行内部件。
-20. **Mermaid / SVG**：围栏与独立 SVG 都由 `diagramBlockField` 做块级替换，不得在 `inlinePlugin` 替换跨行内容。原始和生成的 SVG 必须经 `core/svg.ts` 清理，禁止脚本、事件、嵌入文档、导航链接和外部资源；部件用 Shadow DOM 隔离样式。Mermaid 动态加载、全局串行渲染，`securityLevel: 'strict'`，不执行 `bindFunctions`；异步任务要有代次与销毁保护，完成、失败和尺寸变化后 `requestMeasure()`。主题经 `diagramTheme` facet 重建，块根仍只用 padding。无宽高 SVG 按 viewBox 恢复固有尺寸，避免 flex 收缩成 0 或默认拉满版心。
-21. **桌面与启动队列**：Electron 只用固定 `http://127.0.0.1:5183` 回环来源，以保留 IndexedDB/localStorage；`desktop/server.cjs` 只提供 `dist` 静态文件、`localFiles()` 与原生文件对话框，不包含 Vite 或通用 AI 代理。Host/Origin/自定义头校验不得省略。主进程用单实例锁，macOS `open-file`、Windows 参数和第二实例统一进入 `local-launch.cjs` 队列；页面串行 `openFromHandle()` 后确认，重复文件只激活已有 Writee 标签。旧 macOS Chrome 启动器复用同一队列，AppleScript 只按 URL 激活窗口，不执行页面 JS。桌面和浏览器存档来源不同，不自动迁移。
+1. **文本事务**：任何正文变化必须走 `applyChanges` / `applyTransform` / `replaceText`，不得直接改 `data.text`。DocData 不可变，更新时创建新对象/数组。
+2. **视图同步**：来源相同的输入只更新 base；其他来源加 `syncAnnot`，禁止回写。撤销/重做的 origin 是 `history`。
+3. **手动修改**：只记录 `userEdit: true`；磁盘修改和撤销不算。复制注释提示词据此加入“不要替换成原来的文字”提醒。
+4. **卡片结构**：层级按相对关系计算，唯一 H1 可视为文档标题；移动父级时由 `moveSection` 平移整节标题。`anchors` 保持标题 id 稳定，折叠按 id 存档。
+5. **聚焦重排**：卡片内输入新标题后，等失焦再拆卡，避免光标被打断。
+6. **浮层定位**：统一 page 坐标，优先 DOM 徽标；虚拟化缺 DOM 时用 `registry.posBox`，重排走 `registry.requestLayout()`。未定位卡片用 `usePlacementClass` 隐藏，聚焦必须等定位后。
+7. **AI 请求**：只有 `api.anthropic.com` 才添加官方自适应思考、effort、fallbacks、beta 与缓存参数；第三方只发标准字段和用户额外参数。默认模型 `claude-opus-5-5`。
+8. **存储**：注释、分析、修改痕迹、折叠只存 IndexedDB `writee`；设置存 localStorage：`writee.settings`、`writee.ai`、`writee.copyopts`、`writee.pdf`，标签页列表为 `writee.tabs`。
+9. **动效**：统一 `components/motion.ts`，尊重 reduced-motion。CardEditor 必须在 layout effect 挂载后再做 FLIP 测高；折叠由 `cards/fold.ts` 克隆旧内容，标题不模糊、不淡入。折叠 FLIP 逐个读位置，时长 240–460ms、曲线 `FOLD_EASE`。
+10. **表格写回**：`core/table.ts` 统一模型；局部差异必须加表格起点并交给当前视图构造全文 ChangeSet。控制器挂在 DOM 上，`updateDOM` 原地更新；`rendering` 忽略重建 focusout，失焦提交不抢焦点。部件按键阻止冒泡，避免重复撤销。
+11. **表格布局**：`.cm-content` 必须 `min-width: 0`。表格按内容收缩、最宽到可用宽度，长格换行、短格不折行；不要给列设固定最小宽度。进入编辑时保持原格宽。
+12. **本机系统动作**：open/reveal 复用限权令牌和 localhost POST；相对路径以当前 Markdown 目录解析，禁止 shell 拼接，网页版不伪造真实路径。
+13. **多标签页队列**：打开、切换、关闭统一走 `serial()`，内部递归用 `*Impl`。新文档走 `present(id, install)`；恢复期间 `quiet` 禁止自动写回。Workspace 按 `meta.id` 重挂载，滚动位置应用后清除。
+14. **排版与字体**：正文禁止 `pwid`，显式 `'pwid' 0`，避免全角标点被本机思源宋体收窄。
+15. **窄屏**：≤900px 时左栏留在文档流中挤压正文，宽度用 `--outline-eff = min(--outline-w, 46vw)`；右栏覆盖且两侧互斥。只在进入窄屏时收起侧栏，切标签页不重复收起。
+16. **块级部件**：公式块、表格根节点只用 padding 不用 margin（CodeMirror 测高不计 margin）。视图插件替换装饰不得跨换行；跨行公式交给 `mathBlockField`。
+17. **Mermaid / SVG**：跨行图表统一由 `diagramBlockField` 渲染；原始和生成 SVG 都经 `core/svg.ts`，禁止脚本、事件、外部资源与导航。Mermaid 动态加载、全局串行、strict 模式；异步任务需代次/销毁保护并请求测高。无宽高 SVG 按 viewBox 恢复尺寸。
+18. **桌面与启动队列**：Electron 仅用固定 5183 回环来源；服务只提供 dist、限权文件和原生对话框，不含 Vite/通用代理。Host、Origin、自定义头校验不可省略。Finder、第二实例和参数统一进入 `local-launch.cjs` 原子队列。
+19. **PDF**：`pdfRender.ts` 从全文生成安全 HTML，注释和编辑装饰不导出。预览与打印共用 `.pdf-sheet`；`@page` 负责纸张、页边距、页眉页码，不能在固定页脚用 `counter(page)`。图表先传纯文本占位再换安全 SVG，公式扫描跳过占位。
+20. **桌面 PDF**：只经 `desktop/preload.cjs` 暴露 `savePdf`；IPC 校验当前窗口和回环来源后调用 `printToPDF()`。浏览器回退系统“存储为 PDF”。
+21. **调试钩子**：开发模式 `window.__writee = { useDoc, useUI, registry, session, buildNotesPrompt, importAnalysis, buildManualPrompt }`；改名必须同步 e2e。
+22. **撤销与点击**：表格和公式部件不得破坏全文撤销、注释映射及 CodeMirror 高度表；撤销后落在表格内时恢复单元格选择，而非强制显示源码。
 
 ## 6. 测试
 
-- 单元测试 `src/core/core.test.ts` 与 `src/core/localFiles.test.ts`（vitest）：标题、映射、切句、提示词、分析导入、公式范围、表格/TSV、链接分类、本机路径与系统动作安全；OS 边界注入，不实际弹出外部程序。
-- 端到端 `e2e/`（`npm run e2e`，需先 `npm run dev`；环境变量 `WRITEE_URL`、`CHROME_PATH`、`SHOTS=目录` 保存截图）：
-  - `annotate` 注释流程、徽标/圆点/连线数量、提示词与“手动修改”提醒
-  - `cards` 卡片移动/升降级/撤销、拖拽、三级展开祖先同步与快速切换、标题同宽同位、摘要模糊过渡、删除退场
-  - `file-sync` 用 OPFS 模拟本地文件：自动写回、外部修改载入且注释对齐、存档恢复
-  - `workspace` 工作目录身份、文件替换、同名隔离与旧笔记恢复
-  - `ai-mock` 拦截请求模拟官方 Anthropic / 第三方 Anthropic 兼容 / OpenAI 兼容，校验请求格式与流式解析
-  - `layout` 侧栏拖拽、结构标注、主题光标、320/480/720/900px 顶栏不重叠、左侧栏挤压正文且宽度封顶、右栏覆盖且两侧互斥、切换标签页不收起大纲
-  - `local-file` 真实本机文件读写、编码/冲突/存档、文件菜单与链接动作（动作请求拦截）
-  - `editing` 两种模式的公式、表格编辑/撤销/注释定位/粘贴/拖放/真实剪贴板；表格进入编辑列宽不变、点击落点、Enter/Tab 流程、失焦不抢焦点、右键与行列菜单、拖选、添加行、方向键进出表格与撤销后保持渲染；全角标点不启用 pwid；宽表格 / 长公式不撑宽编辑器（两种模式下正文不出卡片和版心、列多的表格表内滚动、窄表按内容收缩、短单元格不折行）；公式与表格之后点击正文落在点中的行（段落中跨行的 `$$` 不报错且渲染、编辑器高度表与实际行位置一致）
-  - `tabs` 多标签页：新开/切换保留正文、撤销历史、模式与滚动位置，文件型标签页切走前写回、切回载入外部修改、关闭前写回，Alt+数字、拖动排序、右键关闭其他、“+”回文档列表、左侧栏与大纲切换、刷新后恢复列表
-  - `desktop`（`npm run e2e:desktop`，需先构建）：独立临时存档中的 Electron 冷启动、离线 Mermaid/SVG、无 Node 全局、真实写回、A→B→A 单实例与内标签去重、原生打开/另存为；设置 `WRITEE_DESKTOP_EXECUTABLE` 可直接测试打包 `.app` / `.exe`
-- 系统文件选择框、真实 API Key、输入法（IME）、Safari/Firefox、实际外部程序打开无法自动化，需人工验证。
-- 云端容器里的 headless Chromium（Playwright 1243 版）对“从 IndexedDB 取回的 OPFS 句柄”调用任何方法（`isSameEntry`、`resolve`、`queryPermission`……）都会让页面崩溃，因此 `file-sync`、`workspace` 两组在该环境必然失败（改动前同样如此）；需在本机 Chrome 上跑。`tabs` 里的文件型标签页只打开一个 OPFS 文件、不触发取回句柄，可以在两处都运行。
+```bash
+npm run typecheck
+npm test
+npm run dev          # 另一个终端保持运行
+npm run e2e
+npm run e2e:desktop  # 先构建；退出占用 5183 的 Writee
+```
 
-## 7. 当前进度（更新于 2026-11-01）
+- 单元测试：标题、映射、切句、提示词、分析导入、公式、表格/TSV、链接、本机路径与系统动作安全、PDF 规则。
+- 浏览器 E2E 共 10 组：`annotate`、`cards`、`file-sync`、`workspace`、`ai-mock`、`layout`、`local-file`、`editing`、`tabs`、`pdf`。覆盖对应功能的完整交互、两种编辑模式、窄屏、真实文件、公式/表格定位及真实 PDF 字节。
+- 可用 `WRITEE_URL`、`CHROME_PATH`、`SHOTS=目录`；PDF 验收可用 `PDF_OUT=路径`。
+- 桌面 E2E 使用临时存档，覆盖冷启动、离线图表、无 Node 全局、真实写回、单实例/内标签、原生对话框和 PDF 文件；`WRITEE_DESKTOP_EXECUTABLE` 可测打包应用。
+- 系统文件选择框、真实 API Key、IME、Safari/Firefox 和实际外部程序打开仍需人工验证。云端旧 Chromium 的 OPFS 句柄崩溃会让 `file-sync` / `workspace` 失败，应在本机 Chrome 跑。
 
-**本地图片与图表查看（2026-11-01）**：相对路径图片原先被 `ImageWidget` 直接标为占位；实际讲义 SVG 还带 `width="100%"`，与图片 `max-width: 100%` 循环计算后显示宽度为 0。现由当前文档能力令牌读取目录内图片，独占一行的图片按版心宽度显示，并支持放大、缩小和适应宽度。`local-file` 已断言这类 SVG 显示宽度超过 200px。旧安装包不含此修复，需退出正在运行的桌面版后安装新包，或刷新已重启的 localhost:5173。
+## 7. 当前状态（2026-11-01）
 
-**Mermaid / SVG、独立桌面版与 macOS 窗口复用（2026-11-01）**：新增 ` ```mermaid `、` ```svg ` 和独立 SVG 块渲染，主编辑器与卡片共用块级 StateField；DOMPurify + 引用检查清理 SVG，Shadow DOM 隔离样式，Mermaid 懒加载、严格模式、全局串行与五主题重绘，异步测高和点击回源码。两种模式图表 E2E 覆盖恶意输入、固有尺寸、主题、图后点击定位，已检查编辑/卡片截图；纯静态生产包也通过无调试钩子与图表验收。
+- **PDF 导出**：四套预设、纸张方向、字体字号、行距页边距、段间距、强调色、标题、三级目录、页眉页码及缩放预览已完成；设置存 `writee.pdf`。浏览器真实 PDF 和页码已验收，桌面直接保存代码及 E2E 已写好。
+- **最近能力**：Mermaid/SVG、相对路径本地图片与缩放、独立 Electron 桌面壳、macOS 默认 Markdown 打开与窗口复用均已完成。更早的编辑器、卡片、注释、AI、表格、多标签页等需求也已实现；过程见 DEVLOG。
+- **最新验证**：类型检查、24 项单元测试、生产构建、本机 Chrome 全部 10 组 E2E 通过。
+- **唯一新增待验**：当前 `/Applications/Writee.app` 占用 5183，未擅自关闭；退出后复跑 `npm run e2e:desktop` 验证桌面 PDF 保存。
+- 最新 `dist/` 已构建；本次未部署、未发布 Release、未生成新安装包，旧安装包不含 PDF 功能。
 
-新增 Electron + electron-builder 双平台桌面壳：固定 127.0.0.1:5183 回环静态服务复用限权文件接口，单实例、文件关联、原生打开/另存为、CSP 与导航限制；不依赖外部 Node、Chrome 或 Vite。已生成 `release/Writee-0.1.0-mac-arm64.dmg`、`release/Writee-0.1.0-mac-x64.dmg`、`release/Writee-0.1.0-win-x64.exe`（均未签名/公证）；直接从临时工作目录启动打包 arm64 `.app`，离线图表、真实写回、A→B→A 单窗口两内标签、原生对话框均通过。Windows 安装包已生成但未在 Windows 运行。新增原生 CI Release 配置和网页下载入口，尚未推送/发布。
+### 已知限制
 
-macOS 旧 Chrome 启动器改为原子文件队列 + AppleScript 激活现有窗口，后续 Finder 文件在同一页面成为 Writee 内标签；旧服务返回 HTML 时前端静默跳过。用户授权重启 5173 后，真实 Chrome A→B→A 已验证始终 1 个窗口、4 个既有标签，测试前文档已恢复，默认队列清空；新增 `local-file` 队列场景与完整测试通过。类型检查、22 项单元测试、生产构建及本机 Chrome 全部 9 组 E2E 通过。线上 `dist/` 已构建并通过纯静态验收，但本机没有服务器交接目录、SSH 配置或密钥，尚未部署 https://writee.sakisaki.top/ 或发布 Release。
+- 未用真实 API Key 实测；IME、Safari/Firefox、触屏未测试。
+- 纯网页 FSA 入口仍不读取相对路径本地图片；本机启动器和桌面版可以。
+- 卡片模式未虚拟化，超长文档可能较慢；存档只在当前浏览器/桌面来源，无备份迁移功能。
+- 后台标签页不轮询磁盘；刷新后需点选载入。表格不支持“选中后直接打字”进入编辑。
+- 主包约 1.40MB，仍有 Vite 分包提示。
 
-**macOS 默认 Markdown 应用（2026-10-31）**：首次依赖安装已由本机完成（`.mac-runtime/installed.json` 记录类型检查、测试及构建通过）。新增 Swift/AppKit 原生 `Writee.app`，接收 Finder 文件事件并以参数数组传给 Mac Node 启动器；复用原有 `registerFile` 能力令牌、文件读写和自动保存流程。Mac 启动器新增多文件参数与后台服务模式。应用本地签名校验通过，重新运行类型检查和 19 项单元测试通过。Finder 中先对验证文档单独关联并实测 Chrome 打开对应正文、显示已保存，再执行全部更改；Finder 已显示 `Writee（默认）`，确认适用于所有 `.md` 文件。之前默认应用为 Typora，记录在 `.mac-runtime/default-handler-before.json`。应用及相邻 Writee 源码文件夹需保持同级。后台服务的冷启动路径尚未单独验证，本次 UI 实测复用了现有 localhost:5173 服务。
+### 后续候选
 
-**macOS 本地安装准备（2026-10-31）**：本地独立副本，新增 `scripts/launch-mac.cjs`、`scripts/mac-assets.json` 及项目外同级的 Finder 双击入口。使用已验证可运行的 fnm Node.js 24.16.0，不改动 Homebrew。首次启动下载并校验原始图标、按锁文件安装依赖，执行类型检查、单元测试及构建，成功后启动仅监听 localhost:5173 的 Vite 并打开 Chrome。105 个上游文本文件已按 Git blob SHA 校验；启动脚本通过语法检查及 `--check` 预检。Codex 终端网络受限，依赖下载、构建和浏览器功能测试尚未完成，不能视为部署成功。Windows 脚本保持原样。
-
-**修复公式导致的点击错行（2026-10-29）**：用户反馈光标落不到点中的行、怀疑与 LaTeX 有关。查到两个原因：① 段落中间跨行的 `$$…$$` 被视图插件当作行内部件替换换行，CodeMirror 抛 `Decorations that replace line breaks may not be specified via plugins` 并在更新 DOM 到一半时中断，此后屏幕与位置映射错乱；② 公式块和表格用 CSS `margin` 留间距，CodeMirror 测高不计 margin，每个公式块 + 表格让高度表少约 60px，越往下点击越错（5 组之后偏差 301px，约 9 行）。修复：跨行公式统一交给 `mathBlockField`（整行用块级部件，否则用行内部件），视图插件只处理单行公式；公式块间距改为 padding，表格外加只有 padding 的 `.cm-table-block` 根节点，视觉间距不变。验证：逐行点击探针在编辑 / 卡片两种模式下全部落在点中的行，高度表与 DOM 位置偏差为 0；新增 E2E（并分别在只回退插件修复、只回退间距修复时确认会失败）；类型检查、19 项单元测试、生产构建通过，云端 9 组 E2E 中 7 组通过（`file-sync`、`workspace` 仍是容器环境问题）。上一轮 PR 已合并，本分支从最新 `main` 重新开始，推送到 `claude/adoring-thompson-ml3vu0`，未部署线上。
-
-**宽表格不再撑出边界、表格宽度自适应、窄屏左侧栏挤压正文（2026-10-28 第二次）**：用户反馈表格超出卡片时正文也跟着出界、编辑模式下宽度自适应不好、左侧栏不该覆盖正文。根因：上一轮重写表格样式时去掉了原有的 `container-type`，又给每列设了最小宽度，表格的最小宽度经 CodeMirror 的 flex 内容区向上传递，整个编辑器被撑宽（实测编辑模式 895px 对版心 592px，卡片里 869px 对卡片 542px）。修复：`.cm-content { min-width: 0 }` 统一兜住所有宽部件；表格改为按内容收缩（窄表不铺满）、最宽到可用宽度，长格换行、短格不折行，列实在太多时表内横向滚动；进入编辑时保持原格宽。≤900px 时左侧栏改为留在文档流里挤压正文（最多 46% 视口宽），右栏仍覆盖且两侧互斥；进入窄屏只在状态变化时收起侧栏，切换标签页不再把大纲收起。窄卡片头部的“N 张子卡片”不再逐字竖排。验证：类型检查、19 项单元测试、生产构建通过；新增宽内容 E2E（两种模式，先在旧代码上确认会失败），布局 E2E 改为断言挤压、宽度封顶与切换标签页不收起；云端 9 组中 7 组通过（`file-sync`、`workspace` 仍是容器环境问题）。截图检查了宽表、12 列表、嵌套卡片、480/760px 两种模式。推送到 `claude/adoring-thompson-ml3vu0`（上一轮 PR 已合并，本分支从最新 `main` 重新开始），未部署线上。
-
-**多标签页、表格交互、卡片折叠动效与全角标点（2026-10-28，云端会话）**：新增多标签页：每篇文档一个标签页，切换时先写回文件与存档再停放内存快照，切回原样恢复正文、撤销历史、模式、折叠与滚动位置并立即检查外部修改；关闭当前标签页切到相邻页，`+` 回到文档列表；支持中键/×关闭、拖动排序、右键“关闭其他/右侧”、Alt+1…9；标签栏默认在顶部，可移到左侧栏与大纲用开关切换（设置里也可改），刷新后恢复列表、点选再载入。表格部件重写为挂在 DOM 上的控制器并用 `updateDOM` 原地更新：进入编辑列宽不变、点击处落光标、Enter 编辑下一行、Tab 到末格新增行、方向键跨格、拖选范围、右键与行列把手菜单、悬停添加行列、浮动工具条、失焦提交不抢焦点、方向键进出表格、撤销后保持渲染；修复两处“撤销两次”（部件按键冒泡到全局、编辑器处理后焦点移入表格）。卡片折叠/展开改为克隆旧内容原位淡出、新内容模糊淡入，收起时不再先变成空框，标题两侧都不参与动画；高度与下方卡片同一曲线、按变化量定时长，并修复逐帧读取位置的位移翻倍问题。全角标点：去掉正文 `proportional-width`（本机思源宋体下 `，` 被收窄到 7px，与 `,` 无法区分），实测恢复为 18.5px。验证：类型检查、19 项单元测试、生产构建通过；新增 `tabs` E2E，`cards`、`editing` 扩充，9 组中 7 组在云端容器通过，`file-sync`、`workspace` 因容器 Chromium 对 IndexedDB 取回的 OPFS 句柄崩溃而无法运行（改动前同样失败，需在本机 Chrome 复跑）。逐帧截图检查了两种方向的折叠、表格各状态、标签栏顶部/左侧、360/720px 与墨夜主题。本次提交并推送到分支 `claude/adoring-thompson-ml3vu0`，未部署线上。
-
-**公式、表格、卡片动效、本机链接与窄屏（2026-10-27）**：新增 KaTeX 行内/块级公式（四种定界符、代码与转义排除、点击回源码）；表格改为直接编辑单元格，支持键盘与范围选择、行列增删/拖放/对齐、TSV 网格复制粘贴，所有写回经同一全文事务并对齐注释。三级卡片展开同步目标与祖先高度，新子卡不再缩放，快速切换不残留裁剪；复查发现空编辑器测高后，已改为 `CardEditor` 在 layout effect 先挂载再执行 FLIP，动画终点与最终自然高度误差 ≤ 2px；折叠/展开标题统一字体特性与间距，中文双引号同宽同位，摘要使用不占布局的模糊交叉过渡。文件菜单新增另存为、复制真实路径、文件夹显示与系统默认打开；Markdown/裸 URL/表格/wiki 链接 Ctrl+点击打开，本机经限权 POST 接口调用系统默认程序，网页版明确降级。顶栏小屏分行并收纳次要操作，侧栏覆盖且互斥，进入窄屏先展示正文。19 项单元测试、8 组 Chrome E2E、类型检查、生产构建通过；320/480/720/900px 与稳定截图已检查。OS 打开边界用注入测试验证，未在自动化中实际弹出外部应用；本次按用户要求提交并推送 GitHub，未部署线上。
-
-**Windows 候选列表修正（同日）**：初次直接注册 WScript 打开命令时，用户反馈候选列表不显示 Writee。已新增 `scripts/WriteeLauncher.cs`，注册脚本使用 Windows .NET Framework 编译器生成带 Writee 名称与图标的 `scripts/bin/Writee.exe`，以独立 EXE 注册 ProgID、Applications/SupportedTypes 与 App Paths。生成目录已忽略；无控制台窗口，转发参数给原 Node 启动器。Windows Shell 的 `SHAssocEnumHandlers` 实际枚举已返回 `Writee | D:\R_Program\Writee\scripts\bin\Writee.exe`，可从列表选择或手动浏览此 EXE。默认选择仍由用户确认。
-
-**Windows Markdown 打开方式（2026-10-16）**：Node / VBS 启动器接收文件参数，Chrome 应用窗口自动打开指定文件并沿用原有自动写回、外部修改检测、冲突与注释存档流程。`scripts/register-markdown.ps1 -OpenSettings` 向当前用户注册 Writee 的 `.md` / `.markdown` / `.mdown` 打开方式并打开系统设置；不修改受保护的 UserChoice，最终默认选择由用户在 Windows 界面确认。`scripts/local-files.cjs` 提供仅 localhost:5173 开发服务启用的能力令牌文件通道，令牌存于用户临时目录，不写入项目或同步盘。仅接收严格 UTF-8，保持 BOM 和纯 CRLF/LF，拒绝未知编码、过期版本、跨站访问及缺失文件重建；按绝对路径恢复注释，文件替换不影响身份。本入口与浏览器原有 FSA 授权入口的存档身份独立，不自动合并旧存档；临时授权被清理后重新双击即可恢复连接。10 项单元测试、7 组 Chrome E2E、类型检查与生产构建通过；真实本机文件测试覆盖中文/空格/特殊字符路径、原文件写回、编码保持、替换、注释恢复与冲突。已在本机注册候选应用，默认 `.md` 最后核验仍为 Typora，等待系统界面确认；本次按用户要求提交并推送 GitHub，未部署线上。
-
-**注释清理与夜色光标（2026-10-06）**：复制弹窗新增“复制后清除所选注释”，默认关闭并通过原 `writee.copyopts` 记住选择；仅在剪贴板成功写入后删除所选注释，失败保留并提示重试，支持撤销清除。单条、批量及复制后删除共用同一 store 逻辑，同时清理对应的无关联标签，保留其他注释共用的标签与独立标签，一次撤销恢复注释与标签。修正 CodeMirror 默认黑色原生光标覆盖主题 CSS 的问题，主编辑器与卡片编辑器均使用主题强调色。类型检查、10 项单元测试、6 组 Chrome E2E 和生产构建通过；新增 E2E 覆盖真实剪贴板、复制失败、撤销及五套主题的两种编辑模式，复制弹窗与夜色截图检查通过。本次按用户要求提交并推送 GitHub；未部署线上。
-
-**线上部署（2026-10-03）**：https://writee.sakisaki.top/ 已上线，固定提交 `4925a1c4a96c0921079bb8909bd3b13ea4f264d1`，17 项公网和 5 项隔离 Chrome 生产验收通过。运维事实以服务器维护目录 `projects/writee/STATE.md` 为准。
-
-**稳定文件身份（2026-10-04）**：首页及文件菜单新增“工作目录”。授权目录后按目录 ID + 相对路径恢复存档，轮询和写回均从目录重新取得句柄，支持 Agent 反复替换同一路径的文件。现有有效句柄自动迁移；失效旧存档可明确选择新文件重新关联；不同目录同名文件隔离，目标已有存档时拒绝静默覆盖。无位置注释显示“待重新定位”。文件缺失不自动重建，未解决冲突重开后仍保留。类型检查、10 项单元测试、6 组 Chrome E2E 与生产构建通过；新增工作目录 E2E 使用真实 OPFS 目录/文件，系统选择框和本机目录授权仍需人工验证。本次仅本地提交，未部署。
-
-**已完成**：第 1 节需求 1–10 全部实现并通过上述测试。
-
-**GitHub 公开仓库（2026-10-03）**：[LioraRndr/Writee](https://github.com/LioraRndr/Writee)，默认分支 `main`，本机 `origin` 已配置并完成首次推送。上传前完成源码密钥检查、类型检查、10 项单元测试与生产构建；补齐 `Agent.md` 入口与环境配置 / 同步临时文件忽略规则。
-
-**Windows 启动（2026-10-03）**：Node 与 PowerShell 启动器均优先选择 Chrome，支持系统安装与当前用户安装路径；Chrome 未安装时回退到 Edge。`scripts/window-icons.ps1` 静默维护应用窗口的原生 ICO 图标，按 DPI 选择尺寸；窗口全部关闭后自动退出。150% 缩放下原生 48×48 图标读回与源资源逐像素一致，用户已确认任务栏图标清晰。
-
-**尚未验证 / 已知限制**
-- 未用真实 API Key 实测任何服务商（只有模拟测试）；第三方服务的跨域策略各不相同，必要时用“本地代理转发”。
-- 中文输入法组字、Safari/Firefox、触屏未测试。
-- 图片：本机启动器与独立桌面版可读取当前 Markdown 目录内的相对路径图片（含 SVG）；纯网页 FSA 入口仍只显示 http(s)/data/blob。
-- 超长文档（> 10 万字、数百个小节）在卡片模式下每张卡片一个编辑器，未做虚拟化。
-- 存档只在本浏览器；清除站点数据会丢失注释，没有导出/导入存档功能。
-- 写回文件失败时内容只保留在浏览器存档中（顶栏显示“保存失败 · 重试”）。
-- 系统默认程序的实际外部打开未自动化（注入与请求路径已验证），需在本机确认文件关联；生产主包约 1.24MB，仍有 Vite 分包提示。
-- 后台标签页不轮询磁盘，切回时才检查；刷新后标签页列表恢复但不自动载入（文件授权需要用户点击）。
-- 表格单元格“选中后直接打字进入编辑”未做（中文输入法在非可编辑元素上不会开始组字，需点击或 Enter 进入编辑）。
-- 2026-10-28 的改动未在本机 Chrome 跑 `file-sync`、`workspace` 两组 E2E（云端容器无法运行），请在本机补跑。
-
-**可做的下一步（按价值排序，供参考）**
-1. 存档导出 / 导入（注释与分析的备份、换电脑迁移）。
-2. 注释栏“列表视图”（窄屏已支持覆盖式单栏互斥）。
-3. AI 根据注释直接给出修改稿并做差异对比、逐条接受。
-4. 纯网页入口的相对路径图片：在获得工作目录授权后解析。
-5. 卡片视图虚拟化，支持超长文档。
-6. 结构分析分块（超长文章分段请求再合并）。
-7. 按需拆分 KaTeX 与编辑器主包，消除 Vite 分包提示。
-8. 标签页：后台标签页低频轮询外部修改；标签页分组或固定。
+存档导入导出、注释列表视图、AI 差异改稿、FSA 相对图片、卡片虚拟化、长文分析分块、主包拆分、后台标签页低频轮询/分组。
 
 ## 8. 常见坑
 
-- File System Access API 只在安全上下文可用：`localhost` 或 `https`。用 IP 访问 `http://` 时会退化为存档模式。
-- Windows 上 Vite 热更新可能读到 rclone 正在写入的 `*.partial` 临时文件，出现一次性报错，保存完成后会恢复。
-- CodeMirror 开启自动换行后，End 键移动到“视觉行”末尾而非段落末尾（写测试时注意）。
-- `npm run build` 使用 `tsc --noEmit` 再 `vite build`；box 上构建请输出到 `/tmp`，不要写进挂载盘。
+- 不要把编辑器局部 ChangeSet 直接用于全文；不要把跨行替换装饰放进视图插件；不要给块级部件加垂直 margin。
+- Windows 同步时 Vite 可能短暂读到 `*.partial`，保存完成后通常恢复。
+- CodeMirror 自动换行时 End 到视觉行末，不是段落末；写测试需注意。
+- `npm run build = tsc --noEmit + vite build`；box 构建输出到 `/tmp`，不要写挂载盘。
 
-## 9. 服务器部署交接
+## 9. 部署交接
 
-涉及线上部署、配置、域名、版本或服务器文件时，启动先读 `D:\R_Program\服务器\projects\writee\STATE.md` 和 `OUTBOX.md`；收尾向该格子的 `INBOX/` 投递部署简报。服务器维护目录是部署事实真源。运维手册在 `D:\R_Program\服务器\scripts\writee\README.md`。
+线上为 <https://writee.sakisaki.top/>，2026-10-03 部署提交 `4925a1c4a96c0921079bb8909bd3b13ea4f264d1`，Nginx 提供静态文件，无线上 AI 代理或跨设备存档同步。
 
-2026-10-03 已部署 https://writee.sakisaki.top/，固定提交 `4925a1c4a96c0921079bb8909bd3b13ea4f264d1`；Nginx 直接提供静态产物，17 项公网与隔离 Chrome 5 项生产验收通过。线上无本地 Vite AI 代理；localhost 和线上域名的浏览器存档彼此独立，没有服务器跨设备同步。真实 API Key 和系统文件选择框写回未验证。
+涉及部署先读 `D:\R_Program\服务器\projects\writee\STATE.md` 与 `OUTBOX.md`，以服务器维护目录为事实真源；收尾向该格子的 `INBOX/` 投递简报。运维手册在 `D:\R_Program\服务器\scripts\writee\README.md`。

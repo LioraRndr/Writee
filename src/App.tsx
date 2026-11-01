@@ -15,6 +15,7 @@ import { SettingsDialog } from './components/dialogs/SettingsDialog'
 import { AIDialog } from './components/dialogs/AIDialog'
 import { WorkspaceDialog } from './components/dialogs/WorkspaceDialog'
 import { ConflictDialog, FormatDialog, ImportAnalysisDialog } from './components/dialogs/MiscDialogs'
+import { PdfExportDialog } from './components/dialogs/PdfExportDialog'
 
 function isEditable(el: Element | null) {
   if (!el) return false
@@ -174,6 +175,7 @@ export default function App() {
       {dialog === 'analysisImport' && <ImportAnalysisDialog />}
       {dialog === 'format' && <FormatDialog />}
       {dialog === 'conflict' && <ConflictDialog />}
+      {dialog === 'pdf' && <PdfExportDialog />}
       {dragOver && <div className="drop-overlay">松开以打开 Markdown 文件</div>}
       <Toasts />
     </div>

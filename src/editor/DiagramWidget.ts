@@ -1,54 +1,6 @@
 import { EditorView, WidgetType } from '@codemirror/view'
 import { sanitizeSvg, type DiagramKind } from '../core/svg'
-
-interface MermaidApi {
-  initialize(config: Record<string, unknown>): void
-  render(id: string, source: string): Promise<{ svg: string }>
-}
-
-let mermaidImport: Promise<MermaidApi> | null = null
-let mermaidQueue: Promise<unknown> = Promise.resolve()
-let mermaidId = 0
-
-function loadMermaid() {
-  mermaidImport ??= import('mermaid').then((module) => module.default as unknown as MermaidApi)
-  return mermaidImport
-}
-
-function renderMermaid(source: string, theme: string) {
-  const task = mermaidQueue.then(async () => {
-    const mermaid = await loadMermaid()
-    const styles = getComputedStyle(document.documentElement)
-    const value = (name: string) => styles.getPropertyValue(name).trim()
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: 'base',
-      darkMode: styles.colorScheme === 'dark',
-      htmlLabels: false,
-      flowchart: { htmlLabels: false },
-      themeVariables: {
-        background: value('--bg'),
-        primaryColor: value('--accent-soft'),
-        primaryTextColor: value('--ink'),
-        primaryBorderColor: value('--line-strong'),
-        secondaryColor: value('--bg-sunken'),
-        tertiaryColor: value('--bg-elev'),
-        lineColor: value('--ink-3'),
-        textColor: value('--ink'),
-        fontFamily: value('--font-ui'),
-        fontSize: '16px',
-        clusterBkg: value('--bg-elev'),
-        clusterBorder: value('--line'),
-        edgeLabelBackground: value('--bg-elev'),
-      },
-    })
-    const result = await mermaid.render(`writee-mermaid-${theme}-${++mermaidId}`, source)
-    return result.svg
-  })
-  mermaidQueue = task.catch(() => undefined)
-  return task
-}
+import { renderMermaid } from '../core/mermaid'
 
 const controllers = new WeakMap<HTMLElement, DiagramController>()
 

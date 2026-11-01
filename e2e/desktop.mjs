@@ -18,6 +18,7 @@ export default async function desktopTest() {
   const fileA = path.join(dir, '桌面 A.md')
   const fileB = path.join(dir, '桌面 B.md')
   const fileC = path.join(dir, '桌面 另存.md')
+  const filePdf = path.join(dir, '桌面 导出.pdf')
   const originalA = '# 桌面 A\n\n```mermaid\nflowchart LR\n  A[离线] --> B[图表]\n```\n\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><text x="4" y="25">SVG</text></svg>\n\n原文。\n'
   await fs.writeFile(fileA, originalA, 'utf8')
   await fs.writeFile(fileB, '# 桌面 B\n\n第二篇。\n', 'utf8')
@@ -79,6 +80,19 @@ export default async function desktopTest() {
     await page.waitForTimeout(200)
     const savedAs = await fs.readFile(fileC, 'utf8')
     assert(savedAs.includes('第二篇。'), '原生另存为创建并写入新文件')
+
+    await app.evaluate(({ dialog }, file) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: file })
+    }, filePdf)
+    await page.locator('.file-btn').click()
+    await page.getByText('导出 PDF…', { exact: true }).click()
+    await page.locator('.pdf-rendering').waitFor({ state: 'detached' })
+    await page.getByRole('button', { name: '导出 PDF', exact: true }).click()
+    await page.getByText('PDF 已导出', { exact: true }).waitFor({ timeout: 20000 })
+    const pdf = await fs.readFile(filePdf)
+    assert(pdf.subarray(0, 5).toString() === '%PDF-', '桌面导出生成真实 PDF 文件头')
+    assert(pdf.length > 5000, `桌面 PDF 包含实际排版内容（${pdf.length} 字节）`)
+    assertEq(await app.windows().length, 1, 'PDF 导出不创建额外桌面窗口')
     assertEq(errors, [], '桌面生产页面没有控制台异常')
   } finally {
     await app.close()

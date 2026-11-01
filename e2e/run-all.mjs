@@ -2,7 +2,7 @@
 // 前提：npm run dev 已在运行（默认 http://localhost:5173/）
 import { launch } from './helpers.mjs'
 
-const specs = ['annotate', 'cards', 'file-sync', 'workspace', 'ai-mock', 'layout', 'local-file', 'editing', 'tabs']
+const specs = ['annotate', 'cards', 'file-sync', 'workspace', 'ai-mock', 'layout', 'local-file', 'editing', 'tabs', 'pdf']
 const filter = process.argv[2]
 let failed = 0
 
@@ -17,7 +17,8 @@ for (const file of specs) {
     console.log(`✓ ${mod.name}（${Date.now() - t0}ms）`)
   } catch (e) {
     failed++
-    console.log(`✗ ${mod.name}\n  ${String(e.message ?? e).replace(/\n/g, '\n  ')}`)
+    const details = [String(e.message ?? e), ...ctx.errors].join('\n')
+    console.log(`✗ ${mod.name}\n  ${details.replace(/\n/g, '\n  ')}`)
   } finally {
     await ctx.browser.close()
   }

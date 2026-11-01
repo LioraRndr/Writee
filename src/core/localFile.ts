@@ -1,8 +1,14 @@
-import type { LocalFileHandle } from './types'
+import type { FileHandle, LocalFileHandle } from './types'
 
 export const isLocalFile = (h: object): h is LocalFileHandle => 'localKey' in h && 'token' in h
 export const desktopSupported = typeof location !== 'undefined' && location.origin === 'http://127.0.0.1:5183'
 export const localSystemSupported = desktopSupported || (import.meta.env.DEV && typeof location !== 'undefined' && location.origin === 'http://localhost:5173')
+
+export function imageAssetUrl(src: string, handle: FileHandle | null | undefined) {
+  if (/^(https?:|data:|blob:)/.test(src)) return src
+  if (!handle || !isLocalFile(handle)) return null
+  return `/__local_asset/${handle.localKey}?token=${encodeURIComponent(handle.token)}&path=${encodeURIComponent(src)}`
+}
 
 const revisions = new Map<string, string>()
 

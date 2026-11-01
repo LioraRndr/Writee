@@ -1,6 +1,6 @@
 const fs = require('node:fs')
 const path = require('node:path')
-const { app, BrowserWindow, dialog, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const { registerFile } = require('../scripts/local-files.cjs')
 const { createLaunchQueue } = require('../scripts/local-launch.cjs')
 const { startDesktopServer } = require('./server.cjs')
@@ -68,6 +68,26 @@ async function showFileDialog(action, suggestedName) {
   throw new Error('不支持的文件对话框')
 }
 
+ipcMain.handle('writee:save-pdf', async (event, suggestedName) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || !event.senderFrame.url.startsWith(origin + '/')) {
+    throw new Error('PDF 导出请求被拒绝')
+  }
+  if (typeof suggestedName !== 'string' || !suggestedName.trim() || suggestedName.length > 255) throw new Error('PDF 文件名无效')
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: path.basename(suggestedName),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (result.canceled || !result.filePath) return { saved: false }
+  if (!/\.pdf$/i.test(result.filePath)) throw new Error('请使用 .pdf 扩展名')
+  const bytes = await mainWindow.webContents.printToPDF({
+    printBackground: true,
+    preferCSSPageSize: true,
+    displayHeaderFooter: false,
+  })
+  await fs.promises.writeFile(result.filePath, bytes)
+  return { saved: true, path: result.filePath }
+})
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -79,6 +99,7 @@ function createWindow() {
     backgroundColor: '#f5f0e6',
     icon: path.join(__dirname, '../public/writee-logo.png'),
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

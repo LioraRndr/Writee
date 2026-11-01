@@ -1,13 +1,15 @@
 import type { FileHandle } from './types'
-import { isLocalFile, localFileRequest } from './localFile'
+import { desktopFileDialog, desktopSupported, isLocalFile, localFileRequest } from './localFile'
 
-export const fsaSupported = typeof window !== 'undefined' && 'showOpenFilePicker' in window
+export const fsaSupported = typeof window !== 'undefined' && (desktopSupported || 'showOpenFilePicker' in window)
+export const workspaceSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window
 
 const MD_TYPES: FilePickerAcceptType[] = [
   { description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown', '.mdown', '.txt'] } },
 ]
 
-export async function pickMarkdownFile(): Promise<FileSystemFileHandle | null> {
+export async function pickMarkdownFile(): Promise<FileHandle | null> {
+  if (desktopSupported) return desktopFileDialog('open')
   try {
     const [h] = await window.showOpenFilePicker({ types: MD_TYPES, multiple: false, excludeAcceptAllOption: false })
     return h ?? null
@@ -17,7 +19,8 @@ export async function pickMarkdownFile(): Promise<FileSystemFileHandle | null> {
   }
 }
 
-export async function pickSaveFile(suggestedName: string): Promise<FileSystemFileHandle | null> {
+export async function pickSaveFile(suggestedName: string): Promise<FileHandle | null> {
+  if (desktopSupported) return desktopFileDialog('save', suggestedName)
   try {
     return await window.showSaveFilePicker({ suggestedName, types: MD_TYPES })
   } catch (e) {

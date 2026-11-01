@@ -53,7 +53,7 @@ export function WorkspaceDialog() {
         </p>
         <button className="btn" disabled={busy || !supported || !roots.length} onClick={() => void run(async () => {
           const handle = await pickMarkdownFile()
-          if (handle) await relinkCurrent(handle)
+          if (handle && 'getFile' in handle) await relinkCurrent(handle)
         })}>选择文件，关联当前存档…</button>
         <p className="muted small">用于恢复旧笔记，或关联移动、改名后的文件。保留当前存档的笔记，载入所选文件的内容；有未写回的编辑时会提示处理冲突。</p>
       </>}

@@ -8,11 +8,21 @@ import path from 'node:path'
 const require = createRequire(import.meta.url)
 const { localFiles, registerFile } = require('../../scripts/local-files.cjs') as {
   registerFile(file: string): { key: string; token: string }
-  localFiles(options?: { openWith(target: string, reveal: boolean): Promise<void> }): (
+  localFiles(options?: {
+    openWith?(target: string, reveal: boolean): Promise<void>
+    launchQueue?: { take(): unknown; confirm(request: unknown): boolean }
+  }): (
     req: any,
     res: any,
     next: () => void,
   ) => Promise<void>
+}
+const { createLaunchQueue } = require('../../scripts/local-launch.cjs') as {
+  createLaunchQueue(directory: string): {
+    enqueue(capability: { key: string; token: string }): { requestId: string; key: string; token: string }
+    take(): { requestId: string; key: string; token: string } | null
+    confirm(request: { requestId: string; key: string; token: string }): boolean
+  }
 }
 
 describe('document links', () => {
@@ -98,6 +108,77 @@ describe('local system actions', () => {
       expect(ctx.calls).toEqual([])
     } finally {
       await fs.rm(ctx.dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('local launch queue', () => {
+  const a = { key: 'a'.repeat(64), token: '1'.repeat(64) }
+  const b = { key: 'b'.repeat(64), token: '2'.repeat(64) }
+
+  it('原子写入私密请求并按 A、B、A 顺序确认', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'writee-launch-test-'))
+    const queueDirectory = path.join(dir, 'queue')
+    const queue = createLaunchQueue(queueDirectory)
+    try {
+      const first = queue.enqueue(a)
+      const second = queue.enqueue(b)
+      const third = queue.enqueue(a)
+      const names = (await fs.readdir(queueDirectory)).sort()
+      expect(names).toHaveLength(3)
+      expect(names.some(name => name.endsWith('.tmp'))).toBe(false)
+      for (const name of names) expect((await fs.stat(path.join(queueDirectory, name))).mode & 0o777).toBe(0o600)
+      expect(queue.take()).toEqual(first)
+      expect(queue.confirm({ ...first, token: '3'.repeat(64) })).toBe(false)
+      expect(queue.take()).toEqual(first)
+      expect(queue.confirm(first)).toBe(true)
+      expect(queue.take()).toEqual(second)
+      expect(queue.confirm(second)).toBe(true)
+      expect(queue.take()).toEqual(third)
+      expect(queue.confirm(third)).toBe(true)
+      expect(queue.take()).toBeNull()
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('队列接口校验来源与确认令牌', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'writee-launch-test-'))
+    const queue = createLaunchQueue(path.join(dir, 'queue'))
+    const request = queue.enqueue(a)
+    const middleware = localFiles({ launchQueue: queue })
+    const invoke = async (method: string, body?: unknown, token?: string, origin = 'http://localhost:5173') => {
+      const req = new Readable({ read() {} }) as any
+      req.url = '/__local_launch/'
+      req.method = method
+      req.headers = {
+        host: 'localhost:5173',
+        origin,
+        'sec-fetch-site': 'same-origin',
+        'x-writee-launch': '1',
+        'x-writee-token': token,
+        'content-type': 'application/json',
+      }
+      if (body !== undefined) req.push(JSON.stringify(body))
+      req.push(null)
+      const res = {
+        statusCode: 200,
+        body: '',
+        setHeader() {},
+        end(data?: string) { this.body = data ?? '' },
+      }
+      await middleware(req, res, () => { throw new Error('不应进入下一个中间件') })
+      return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : {} }
+    }
+    try {
+      expect((await invoke('GET', undefined, undefined, 'https://example.com')).status).toBe(403)
+      expect((await invoke('GET')).body).toEqual(request)
+      expect((await invoke('POST', request, '3'.repeat(64))).status).toBe(403)
+      expect(queue.take()).toEqual(request)
+      expect((await invoke('POST', request, a.token)).status).toBe(200)
+      expect(queue.take()).toBeNull()
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
     }
   })
 })

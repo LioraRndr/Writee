@@ -4,12 +4,18 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type Decoration
 import type { SyntaxNode } from '@lezer/common'
 import { findMathRanges, type MathRange, type TextRange } from '../core/math'
 import { findWikiLinks, linkKind, type WikiLink } from '../core/links'
+import { isLocalFile } from '../core/localFile'
+import { useDoc } from '../store/docStore'
+import type { FileHandle } from '../core/types'
+import { diagramLanguage, isStandaloneSvgSource, type DiagramKind } from '../core/svg'
 import { MathWidget } from './MathWidget'
 import { LinkWidget } from './LinkWidget'
+import { DiagramWidget } from './DiagramWidget'
 import { TableWidget, focusTableAt } from './TableWidget'
 
 /** 是否隐藏 Markdown 标记（实时预览）；关闭时为“源码模式”，仍保留排版样式 */
 export const hideMarks = Facet.define<boolean, boolean>({ combine: (v) => (v.length ? v[v.length - 1] : true) })
+export const diagramTheme = Facet.define<string, string>({ combine: (v) => (v.length ? v[v.length - 1] : 'xuan') })
 
 class BulletWidget extends WidgetType {
   constructor(readonly depth: number) {
@@ -76,33 +82,142 @@ class HrWidget extends WidgetType {
   }
 }
 
+function imageUrl(src: string, handle: FileHandle | null) {
+  if (/^(https?:|data:|blob:)/.test(src)) return src
+  if (!handle || !isLocalFile(handle)) return null
+  return `/__local_asset/${handle.localKey}?token=${encodeURIComponent(handle.token)}&path=${encodeURIComponent(src)}`
+}
+
 class ImageWidget extends WidgetType {
-  constructor(readonly src: string, readonly alt: string) {
+  readonly url: string | null
+
+  constructor(
+    readonly src: string,
+    readonly alt: string,
+    handle: FileHandle | null,
+    readonly block: boolean,
+    readonly from: number,
+  ) {
     super()
+    this.url = imageUrl(src, handle)
   }
+
   eq(o: ImageWidget) {
-    return o.src === this.src && o.alt === this.alt
+    return o.src === this.src && o.alt === this.alt && o.url === this.url && o.block === this.block && o.from === this.from
   }
-  toDOM() {
-    const wrap = document.createElement('span')
-    wrap.className = 'cm-md-image'
-    if (/^(https?:|data:|blob:)/.test(this.src)) {
-      const img = document.createElement('img')
-      img.src = this.src
-      img.alt = this.alt
-      img.loading = 'lazy'
-      img.onerror = () => {
-        wrap.textContent = '🖼 ' + (this.alt || this.src)
-        wrap.classList.add('is-broken')
-      }
-      wrap.appendChild(img)
-    } else {
-      wrap.textContent = '🖼 ' + (this.alt || this.src)
-      wrap.classList.add('is-broken')
-      wrap.title = this.src
+
+  toDOM(view: EditorView) {
+    return new ImageController(view, this).root
+  }
+
+  updateDOM(dom: HTMLElement, view: EditorView) {
+    imageControllers.get(dom)?.update(this, view)
+    return true
+  }
+
+  destroy(dom: HTMLElement) {
+    imageControllers.get(dom)?.destroy()
+  }
+
+  get estimatedHeight() {
+    return this.block ? 280 : 48
+  }
+
+  ignoreEvent() {
+    return true
+  }
+}
+
+const imageControllers = new WeakMap<HTMLElement, ImageController>()
+
+class ImageController {
+  readonly root: HTMLElement
+  private readonly frame: HTMLElement
+  private readonly image: HTMLImageElement | null
+  private zoom = 1
+  private zoomLabel: HTMLButtonElement | null = null
+
+  constructor(private view: EditorView, private widget: ImageWidget) {
+    this.root = document.createElement(widget.block ? 'div' : 'span')
+    this.root.className = 'cm-md-image' + (widget.block ? ' is-block' : '')
+    this.frame = document.createElement('div')
+    this.frame.className = 'cm-image-frame'
+    if (!widget.url) {
+      this.broken()
+      this.image = null
+      imageControllers.set(this.root, this)
+      return
     }
-    return wrap
+    if (widget.block) this.root.append(this.tools(), this.frame)
+    else this.root.append(this.frame)
+    const image = document.createElement('img')
+    image.alt = widget.alt
+    image.src = widget.url
+    image.onload = () => {
+      this.applyZoom()
+      view.requestMeasure()
+    }
+    image.onerror = () => this.broken()
+    this.image = image
+    this.frame.append(image)
+    this.applyZoom()
+    imageControllers.set(this.root, this)
   }
+
+  update(widget: ImageWidget, view: EditorView) {
+    this.widget = widget
+    this.view = view
+  }
+
+  private tools() {
+    const tools = document.createElement('div')
+    tools.className = 'cm-image-tools'
+    const button = (text: string, title: string, action: () => void) => {
+      const el = document.createElement('button')
+      el.type = 'button'
+      el.textContent = text
+      el.title = title
+      el.setAttribute('aria-label', title)
+      el.addEventListener('mousedown', (event) => event.preventDefault())
+      el.addEventListener('click', action)
+      return el
+    }
+    const label = button('100%', '适应宽度', () => this.setZoom(1))
+    this.zoomLabel = label
+    tools.append(
+      button('−', '缩小', () => this.setZoom(this.zoom / 1.25)),
+      label,
+      button('＋', '放大', () => this.setZoom(this.zoom * 1.25)),
+    )
+    return tools
+  }
+
+  private setZoom(value: number) {
+    this.zoom = Math.max(0.25, Math.min(8, value))
+    this.applyZoom()
+  }
+
+  private applyZoom() {
+    if (!this.image) return
+    this.image.style.width = `${Math.round(this.zoom * 100)}%`
+    if (this.zoomLabel) this.zoomLabel.textContent = `${Math.round(this.zoom * 100)}%`
+    this.view.requestMeasure()
+  }
+
+  private broken() {
+    this.root.textContent = '🖼 ' + (this.widget.alt || this.widget.src)
+    this.root.classList.add('is-broken')
+    this.root.title = this.widget.src
+  }
+
+  destroy() {
+    imageControllers.delete(this.root)
+  }
+}
+
+function standaloneImage(state: EditorState, from: number, to: number) {
+  const line = state.doc.lineAt(from)
+  return line.number === state.doc.lineAt(to).number && !line.text.slice(0, from - line.from).trim() && !line.text.slice(to - line.from).trim()
 }
 
 function touches(state: EditorState, focused: boolean, from: number, to: number) {
@@ -159,6 +274,51 @@ function wikiRanges(state: EditorState) {
   return ranges
 }
 
+interface DiagramRange {
+  from: number
+  to: number
+  source: string
+  kind: DiagramKind
+}
+
+const diagramCache = new WeakMap<EditorState, DiagramRange[]>()
+
+function diagramRanges(state: EditorState) {
+  const cached = diagramCache.get(state)
+  if (cached) return cached
+  const ranges: DiagramRange[] = []
+  syntaxTree(state).iterate({
+    enter: (ref) => {
+      if (ref.name === 'FencedCode') {
+        const info = ref.node.getChild('CodeInfo')
+        const kind = info ? diagramLanguage(state.doc.sliceString(info.from, info.to)) : null
+        if (!kind) return false
+        const code = ref.node.getChild('CodeText')
+        ranges.push({
+          from: state.doc.lineAt(ref.from).from,
+          to: state.doc.lineAt(ref.to).to,
+          source: code ? state.doc.sliceString(code.from, code.to) : '',
+          kind,
+        })
+        return false
+      }
+      if (ref.name === 'HTMLBlock' || ref.name === 'Paragraph') {
+        const source = state.doc.sliceString(ref.from, ref.to)
+        if (!isStandaloneSvgSource(source)) return false
+        ranges.push({
+          from: state.doc.lineAt(ref.from).from,
+          to: state.doc.lineAt(ref.to).to,
+          source,
+          kind: 'svg',
+        })
+        return false
+      }
+    },
+  })
+  diagramCache.set(state, ranges)
+  return ranges
+}
+
 /** 公式跨越换行：视图插件不能替换换行符，必须交给 StateField 渲染 */
 function spansLines(state: EditorState, range: MathRange) {
   return state.doc.lineAt(range.from).number !== state.doc.lineAt(range.to).number
@@ -179,6 +339,7 @@ function buildInline(view: EditorView): DecorationSet {
   const doc = state.doc
   const maths = mathRanges(state)
   const wikis = wikiRanges(state)
+  const diagrams = diagramRanges(state)
   const lineDecoDone = new Set<number>()
   const addLine = (pos: number, cls: string, attrs?: Record<string, string>) => {
     const line = doc.lineAt(pos)
@@ -230,7 +391,11 @@ function buildInline(view: EditorView): DecorationSet {
           addLine(ref.from, 'cm-h cm-h' + name.slice(-1))
           return
         }
-        if (maths.some((m) => ref.from >= m.from && ref.to <= m.to) || wikis.some((w) => ref.from >= w.from && ref.to <= w.to)) return false
+        if (
+          maths.some((m) => ref.from >= m.from && ref.to <= m.to) ||
+          wikis.some((w) => ref.from >= w.from && ref.to <= w.to) ||
+          diagrams.some((d) => ref.from >= d.from && ref.to <= d.to && hide && !touches(state, focused, d.from, d.to))
+        ) return false
         switch (name) {
           case 'Emphasis':
           case 'StrongEmphasis':
@@ -304,9 +469,9 @@ function buildInline(view: EditorView): DecorationSet {
               if (c.name === 'LinkMark') marks.push(c)
             }
             const alt = marks.length >= 2 ? doc.sliceString(marks[0].to, marks[1].from) : ''
-            if (hide && !active) {
-              decos.push(Decoration.replace({ widget: new ImageWidget(src, alt) }).range(ref.from, ref.to))
-            } else mark(ref.from, ref.to, 'cm-md-mark')
+            if (hide && !active && !standaloneImage(state, ref.from, ref.to)) {
+              decos.push(Decoration.replace({ widget: new ImageWidget(src, alt, useDoc.getState().meta?.handle ?? null, false, ref.from) }).range(ref.from, ref.to))
+            } else if (!(hide && !active)) mark(ref.from, ref.to, 'cm-md-mark')
             return false
           }
           case 'Blockquote': {
@@ -557,7 +722,78 @@ const mathBlockField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
-/** 语法树逐步解析完成后刷新表格与公式 */
+const imageBlockField = StateField.define<DecorationSet>({
+  create: (state) => buildImageBlocks(state),
+  update(value, tr) {
+    if (
+      tr.docChanged ||
+      tr.selection ||
+      tr.effects.some((effect) => effect.is(setFocused)) ||
+      syntaxTree(tr.startState) !== syntaxTree(tr.state) ||
+      tr.startState.facet(hideMarks) !== tr.state.facet(hideMarks)
+    ) return buildImageBlocks(tr.state)
+    return value
+  },
+  provide: (field) => EditorView.decorations.from(field),
+})
+
+function buildImageBlocks(state: EditorState): DecorationSet {
+  if (!state.facet(hideMarks)) return Decoration.none
+  const focused = state.field(focusedField)
+  const handle = useDoc.getState().meta?.handle ?? null
+  const decos: Range<Decoration>[] = []
+  syntaxTree(state).iterate({
+    enter: (ref) => {
+      if (ref.name !== 'Image' || !standaloneImage(state, ref.from, ref.to) || touches(state, focused, ref.from, ref.to)) return
+      let src = ''
+      const marks: SyntaxNode[] = []
+      for (let child = ref.node.firstChild; child; child = child.nextSibling) {
+        if (child.name === 'URL') src = state.doc.sliceString(child.from, child.to)
+        if (child.name === 'LinkMark') marks.push(child)
+      }
+      const alt = marks.length >= 2 ? state.doc.sliceString(marks[0].to, marks[1].from) : ''
+      const from = state.doc.lineAt(ref.from).from
+      const to = state.doc.lineAt(ref.to).to
+      decos.push(Decoration.replace({ widget: new ImageWidget(src, alt, handle, true, from), block: true }).range(from, to))
+      return false
+    },
+  })
+  return Decoration.set(decos, true)
+}
+
+function buildDiagramBlocks(state: EditorState): DecorationSet {
+  if (!state.facet(hideMarks)) return Decoration.none
+  const focused = state.field(focusedField)
+  const decos: Range<Decoration>[] = []
+  for (const diagram of diagramRanges(state)) {
+    if (touches(state, focused, diagram.from, diagram.to)) continue
+    decos.push(
+      Decoration.replace({
+        widget: new DiagramWidget(diagram.kind, diagram.source, diagram.from, state.facet(diagramTheme)),
+        block: true,
+      }).range(diagram.from, diagram.to),
+    )
+  }
+  return Decoration.set(decos, true)
+}
+
+const diagramBlockField = StateField.define<DecorationSet>({
+  create: (state) => buildDiagramBlocks(state),
+  update(value, tr) {
+    if (
+      tr.docChanged ||
+      tr.selection ||
+      tr.effects.some((effect) => effect.is(setFocused)) ||
+      syntaxTree(tr.startState) !== syntaxTree(tr.state) ||
+      tr.startState.facet(hideMarks) !== tr.state.facet(hideMarks) ||
+      tr.startState.facet(diagramTheme) !== tr.state.facet(diagramTheme)
+    ) return buildDiagramBlocks(tr.state)
+    return value
+  },
+  provide: (field) => EditorView.decorations.from(field),
+})
+
+/** 语法树逐步解析完成后刷新块级部件 */
 const treeWatcher = ViewPlugin.fromClass(
   class {
     update(u: ViewUpdate) {
@@ -576,6 +812,8 @@ export function livePreview(): Extension {
     tableField,
     tableKeys,
     mathBlockField,
+    imageBlockField,
+    diagramBlockField,
     treeWatcher,
     focusEffect.of((_s, focusing) => setFocused.of(focusing)),
   ]

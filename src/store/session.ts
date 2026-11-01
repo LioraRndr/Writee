@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { useDoc, type DocSnapshot, type FileStatus } from './docStore'
 import { useUI } from './uiStore'
 import type { DocArchive, DocData, DocIndexEntry, FileHandle, FileLocation } from '../core/types'
-import { isLocalFile, launchedFile, localFileAction, localSystemSupported } from '../core/localFile'
+import { isLocalFile, launchedFile, localFileAction, localSystemSupported, takeLaunchedFile, confirmLaunchedFile } from '../core/localFile'
 import { linkKind } from '../core/links'
 import { deleteArchive, findArchiveByHandle, findArchiveByName, findArchiveByLocation, handleAtLocation, locateFile, locationRoot, loadArchive, loadIndex, saveArchive, saveRoot } from '../core/archive'
 import {
@@ -423,14 +423,34 @@ async function openFromHandleImpl(handle: FileHandle) {
     const location = pathArchive?.location ?? locations[0]
     const id = a?.id ?? uid('d')
     await present(id, () => openArchiveData(a, id, handle.name, handle, text, modified, location))
+    return true
   } catch (e) {
     useUI.getState().toast('打开失败：' + (e instanceof Error ? e.message : String(e)), { tone: 'error' })
+    return false
   } finally {
     useSession.setState({ loading: false })
   }
 }
 
 export const openFromHandle = serial(openFromHandleImpl)
+
+let launchQueue: Promise<void> = Promise.resolve()
+
+export function drainLaunches() {
+  const run = launchQueue.then(async () => {
+    for (;;) {
+      const request = await takeLaunchedFile()
+      if (!request) return
+      const handle = await launchedFile(request)
+      if (!handle || !(await openFromHandle(handle))) return
+      await confirmLaunchedFile(request)
+    }
+  }).catch((e) => {
+    useUI.getState().toast('打开启动请求失败：' + (e instanceof Error ? e.message : String(e)), { tone: 'error', ms: 6000 })
+  })
+  launchQueue = run
+  return run
+}
 
 export const openFromFile = serial(async (file: File) => {
   const text = normalizeNewlines(await file.text())
@@ -764,6 +784,7 @@ export function startSession() {
   void launchedFile().then((handle) => {
     if (handle) return openFromHandle(handle)
   }).catch((e) => useUI.getState().toast('打开失败：' + e.message, { tone: 'error', ms: 8000 }))
+    .then(() => drainLaunches())
   useDoc.subscribe((s, p) => {
     if (!s.meta || quiet) return
     if (s.data !== p.data) scheduleArchive()
@@ -774,9 +795,15 @@ export function startSession() {
     if (s.mode !== p.mode || s.collapsed !== p.collapsed) scheduleArchive()
   })
   window.setInterval(() => {
-    if (document.visibilityState === 'visible') void checkDisk()
+    if (document.visibilityState === 'visible') {
+      void checkDisk()
+      void drainLaunches()
+    }
   }, 2000)
-  window.addEventListener('focus', () => void checkDisk())
+  window.addEventListener('focus', () => {
+    void checkDisk()
+    void drainLaunches()
+  })
   window.addEventListener('beforeunload', () => {
     void persistNow()
   })
@@ -784,6 +811,8 @@ export function startSession() {
     if (document.visibilityState === 'hidden') {
       void persistNow()
       void writeNow()
+    } else {
+      void drainLaunches()
     }
   })
 }

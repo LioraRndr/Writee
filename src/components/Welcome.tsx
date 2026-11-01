@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useSession, useTabs, refreshRecent, openDialog, openRecent, openSample, newDocument, forgetArchive } from '../store/session'
-import { fsaSupported } from '../core/fileAccess'
+import { fsaSupported, workspaceSupported } from '../core/fileAccess'
+import { desktopSupported } from '../core/localFile'
 import { useUI } from '../store/uiStore'
 import { Menu } from './Menu'
 import { IconFile, IconFolder, IconMore, IconPlus, IconSpark } from './icons'
@@ -31,7 +32,7 @@ export function Welcome() {
           打开一篇本地 Markdown 文章：在原文件上实时编辑，按标题切成卡片调整结构，框选文字写下注释，再一键整理给 AI。
         </p>
         <div className="welcome-actions">
-          {fsaSupported && <button className="btn lg" onClick={() => useUI.setState({ dialog: 'workspace' })} disabled={loading}>
+          {workspaceSupported && <button className="btn lg" onClick={() => useUI.setState({ dialog: 'workspace' })} disabled={loading}>
             <IconFolder size={17} /> 工作目录
           </button>}
           <button className="btn is-primary lg" onClick={() => void openDialog()} disabled={loading}>
@@ -43,11 +44,18 @@ export function Welcome() {
           <button className="btn lg is-ghost" onClick={() => void openSample()}>
             <IconSpark size={16} /> 看看示例
           </button>
+          {!desktopSupported && (
+            <a className="btn lg is-ghost" href="https://github.com/LioraRndr/Writee/releases/latest" target="_blank" rel="noreferrer">
+              <IconFile size={16} /> 下载桌面版
+            </a>
+          )}
         </div>
         <p className="welcome-hint muted small">
-          {fsaSupported
-            ? '也可以把 .md 文件直接拖进窗口。修改会自动写回原文件；注释与分析保存在浏览器的存档里，不会写入文件。'
-            : '当前浏览器不支持直接写回本地文件（建议使用 Chrome 或 Edge）。你仍可打开文件编辑，修改保存在浏览器存档中，可随时下载。'}
+          {desktopSupported
+            ? '也可以把 .md 文件直接拖进窗口。修改会自动写回原文件；注释与分析保存在本机存档里，不会写入文件。'
+            : fsaSupported
+              ? '也可以把 .md 文件直接拖进窗口。修改会自动写回原文件；注释与分析保存在浏览器的存档里，不会写入文件。'
+              : '当前浏览器不支持直接写回本地文件（建议使用 Chrome 或 Edge）。你仍可打开文件编辑，修改保存在浏览器存档中，可随时下载。'}
         </p>
 
         {recent.length > 0 && (

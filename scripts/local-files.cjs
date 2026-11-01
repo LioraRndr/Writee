@@ -6,6 +6,7 @@ const path = require('node:path')
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto')
 const { spawn } = require('node:child_process')
 const { fileURLToPath } = require('node:url')
+const { takeLaunchedFile, confirmLaunchedFile } = require('./local-launch.cjs')
 
 const directory = path.join(os.tmpdir(), 'writee-local-files-ed94e1e9-0d44-467a-a738-445a929ca50d')
 const digest = (value) => createHash('sha256').update(value).digest('hex')
@@ -98,20 +99,87 @@ function openWithSystem(target, reveal) {
   })
 }
 
+const assetTypes = {
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.gif': 'image/gif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+}
+
+async function readLocalAsset(currentFile, target) {
+  if (typeof target !== 'string' || !target.trim() || target.length > 4096 || target.includes('\0')) {
+    throw new Error('图片路径无效')
+  }
+  let value
+  try { value = decodeURIComponent(target.trim()) } catch { throw new Error('图片路径编码无效') }
+  if (path.isAbsolute(value) || /^[a-z][a-z0-9+.-]*:/i.test(value)) throw new Error('只允许当前文档目录内的相对图片路径')
+  const root = path.dirname(currentFile)
+  const file = await fsp.realpath(path.resolve(root, value))
+  if (!file.startsWith(root + path.sep)) throw new Error('图片不能超出当前文档目录')
+  const type = assetTypes[path.extname(file).toLowerCase()]
+  if (!type) throw new Error('不支持的图片格式')
+  const stat = await fsp.stat(file)
+  if (!stat.isFile() || stat.size > limit) throw new Error('图片无效或超过 20 MB')
+  return { bytes: await fsp.readFile(file), type }
+}
+
 // 只注册在 localhost 开发服务，不包含在静态部署中。
 function localFiles(options = {}) {
   const openWith = options.openWith ?? openWithSystem
+  const launchQueue = options.launchQueue ?? { take: takeLaunchedFile, confirm: confirmLaunchedFile }
+  const origin = options.origin ?? 'http://localhost:5173'
+  const host = options.host ?? new URL(origin).host
   return async (req, res, next) => {
-    if (!req.url?.startsWith('/__local_file/')) return next()
+    const launchRequest = req.url === '/__local_launch/'
+    const assetRequest = req.url?.startsWith('/__local_asset/')
+    if (!launchRequest && !assetRequest && !req.url?.startsWith('/__local_file/')) return next()
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     const fail = (status, message) => { res.statusCode = status; res.end(JSON.stringify({ error: message })) }
-    const key = req.url.slice('/__local_file/'.length)
-    const origin = 'http://localhost:5173'
     // 自定义头使跨站请求必须预检；此接口不提供 CORS 授权。
-    if (req.headers.host !== 'localhost:5173' || (req.headers.origin && req.headers.origin !== origin)
-      || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))
-      || !/^[a-f0-9]{64}$/.test(key)) return fail(403, '本地文件请求被拒绝')
+    if (req.headers.host !== host || (req.headers.origin && req.headers.origin !== origin)
+      || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))) return fail(403, '本地文件请求被拒绝')
+    if (launchRequest) {
+      if (req.headers['x-writee-launch'] !== '1') return fail(403, '本地启动请求被拒绝')
+      if (!['GET', 'POST'].includes(req.method)) return fail(405, '不支持的请求方式')
+      try {
+        if (req.method === 'GET') return res.end(JSON.stringify(launchQueue.take()))
+        const body = await readJson(req, 4096)
+        if (body?.token !== req.headers['x-writee-token'] || !launchQueue.confirm(body)) return fail(403, '启动请求授权无效')
+        return res.end(JSON.stringify({ ok: true }))
+      } catch (error) {
+        return fail(400, error.message)
+      }
+    }
+    if (assetRequest) {
+      if (!['GET', 'HEAD'].includes(req.method)) return fail(405, '不支持的请求方式')
+      try {
+        const url = new URL(req.url, origin)
+        const key = url.pathname.slice('/__local_asset/'.length)
+        const token = url.searchParams.get('token')
+        if (!/^[a-f0-9]{64}$/.test(key) || typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
+          return fail(403, '图片授权无效')
+        }
+        const saved = JSON.parse(await fsp.readFile(path.join(directory, key + '.json'), 'utf8'))
+        if (!timingSafeEqual(Buffer.from(token), Buffer.from(saved.token))) return fail(403, '图片授权无效')
+        const asset = await readLocalAsset(saved.file, url.searchParams.get('path'))
+        res.setHeader('Content-Type', asset.type)
+        res.setHeader('Content-Length', asset.bytes.length)
+        res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
+        res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+        res.setHeader('Referrer-Policy', 'no-referrer')
+        res.setHeader('X-Content-Type-Options', 'nosniff')
+        return res.end(req.method === 'HEAD' ? undefined : asset.bytes)
+      } catch (error) {
+        return fail(error.code === 'ENOENT' ? 404 : 400, error.message)
+      }
+    }
+    const key = req.url.slice('/__local_file/'.length)
+    if (!/^[a-f0-9]{64}$/.test(key)) return fail(403, '本地文件请求被拒绝')
     if (!['GET', 'PUT', 'POST'].includes(req.method)) return fail(405, '不支持的请求方式')
     try {
       const saved = JSON.parse(await fsp.readFile(path.join(directory, key + '.json'), 'utf8'))

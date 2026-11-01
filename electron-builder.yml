@@ -1,0 +1,48 @@
+appId: top.sakisaki.writee
+productName: Writee
+directories:
+  output: release
+files:
+  - dist/**/*
+  - desktop/**/*
+  - scripts/local-files.cjs
+  - scripts/local-launch.cjs
+  - public/writee-logo.png
+  - public/favicon.ico
+  - package.json
+asar: true
+npmRebuild: false
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+fileAssociations:
+  - ext:
+      - md
+      - markdown
+      - mdown
+    name: Markdown
+    description: Markdown document
+    role: Editor
+    mimeType: text/markdown
+mac:
+  category: public.app-category.productivity
+  icon: public/writee-logo.png
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+win:
+  icon: public/favicon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Writee
+  installerIcon: public/favicon.ico
+  uninstallerIcon: public/favicon.ico
+  installerHeaderIcon: public/favicon.ico
